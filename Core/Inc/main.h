@@ -67,7 +67,7 @@ void Error_Handler(void);
 // DRV Chip
 int DRV_SPI_Transmit_Check(uint16_t,uint16_t);				// custom SPI transmit and check
 int DRV_Start(void);										// sends over SPI commands to setup
-//void DRV_Error(void);										// when NFAULT error occurs
+void DRV_Error(void);										// when NFAULT error occurs
 // ADC
 void Read_ADCs(float*, float*, float*, float*, float*);		// reads ADCs and returns in those pointers
 // Encoder
@@ -115,6 +115,8 @@ void IF_B_Int(void);		// Phase B interrupt for encoder
 #define SWCLK_GPIO_Port GPIOA
 #define DRV_EN_Pin GPIO_PIN_11
 #define DRV_EN_GPIO_Port GPIOC
+#define DRV_FAULT_Pin GPIO_PIN_2
+#define DRV_FAULT_GPIO_Port GPIOD
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */

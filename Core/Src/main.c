@@ -189,9 +189,13 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
+	  if(HAL_GPIO_ReadPin(DRV_FAULT_GPIO_Port, DRV_FAULT_Pin)==0)
+		  DRV_Error();
+
 //	  HAL_GPIO_TogglePin(Y_LED_GPIO_Port, Y_LED_Pin);
 	  HAL_GPIO_TogglePin(G_LED_GPIO_Port, G_LED_Pin);
-	  HAL_Delay(1000);
+	  HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -640,6 +644,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, Y_LED_Pin|G_LED_Pin, GPIO_PIN_RESET);
@@ -682,6 +687,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(DRV_EN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : DRV_FAULT_Pin */
+  GPIO_InitStruct.Pin = DRV_FAULT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(DRV_FAULT_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
@@ -746,7 +757,6 @@ int   DRV_Start(void)
 
 	return 0;
 }
-/*
 void  DRV_Error(void)
 {
 	printf("DRV Error\n");
@@ -766,7 +776,7 @@ void  DRV_Error(void)
 
 		printf("0x%x Register:  %i%i%i  %i%i%i%i %i%i%i%i\n",i,(int)(SPI_Buff[0]>>2&1UL) ,(int)(SPI_Buff[0]>>1&1UL) ,(int)(SPI_Buff[0]>>0&1UL) ,(int)(SPI_Buff[1]>>7&1UL) ,(int)(SPI_Buff[1]>>6&1UL) ,(int)(SPI_Buff[1]>>5&1UL) ,(int)(SPI_Buff[1]>>4&1UL) ,(int)(SPI_Buff[1]>>3&1UL) ,(int)(SPI_Buff[1]>>2&1UL) ,(int)(SPI_Buff[1]>>1&1UL) ,(int)(SPI_Buff[1]>>0&1UL) );
 	}
-}*/
+}
 // Read ADCs
 void  Read_ADCs(float*Cur_Phase_A, float*Cur_Phase_B, float*Cur_Phase_C, float*V_Bat, float*Temp_Board_C)
 {
