@@ -156,22 +156,21 @@ int main(void)
 
   /* Startup DRV chip */
   printf("Start DRV... ");
-  //  int DRV_Err = DRV_Start();		// startup and write SPI registers
-  //  if(DRV_Err){						// if errors occurs,
-  //    printf("Error: %i\n",DRV_Err);	// printf
-  //    //while(1);
-  //  }
+  int DRV_Err = DRV_Start();		// startup and write SPI registers
+  if(DRV_Err){						// if errors occurs,
+	  printf("Error: %i\n",DRV_Err);	// printf
+	  //while(1);
+  }
   printf("Good\n");
 
   /* Check Encoder talks */
   printf("Start ENC... ");
-  //  Read_Encoder_SPI_Ang(&ENC_Ang);
-  //  int Enc_Err = Read_Encoder_SPI_Ang(&ENC_Ang);		// read one value from encoders
-  //  if(Enc_Err){										// if errors occurs,
-  //  	  printf("Error: %i\n",Enc_Err);					// printf
-  //  	  //while(1);
-  //  }
-  //  ENC_IIF_Count = (int)(ENC_Ang /360.0 * 4095.0);	// Zero encoder
+  int Enc_Err = Read_Encoder_SPI_Ang(&ENC_Ang);		// read one value from encoders
+  if(Enc_Err){										// if errors occurs,
+	  printf("Error: %i\n",Enc_Err);					// printf
+	  //while(1);
+  }
+  ENC_IIF_Count = (int)(ENC_Ang /360.0 * 4095.0);	// Zero encoder
   printf("Good\n");
 
   printf("while(1) start\n");
