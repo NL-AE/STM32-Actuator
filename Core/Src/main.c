@@ -138,12 +138,16 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
 
+  printf(" Actuator Firmware Version: 1.0\n");
+  HAL_Delay(10);
+
   /* Start ADCs */
   printf("Start ADC... ");
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
   HAL_ADC_Start_DMA(&hadc3, ADC_3_Reading, 3);
   printf("Good\n");
+  HAL_Delay(10);
 
   /* Startup PWM */
   printf("Start PWM... ");
@@ -153,6 +157,7 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, Phase_C_Ch);
   Set_PWM3(0,0,0);							// Set PWM channels to off
   printf("Good\n");
+  HAL_Delay(10);
 
   /* Startup DRV chip */
   printf("Start DRV... ");
@@ -162,6 +167,7 @@ int main(void)
 	  //while(1);
   }
   printf("Good\n");
+  HAL_Delay(10);
 
   /* Check Encoder talks */
   printf("Start ENC... ");
@@ -172,8 +178,10 @@ int main(void)
   }
   ENC_IIF_Count = (int)(ENC_Ang /360.0 * 4095.0);	// Zero encoder
   printf("Good\n");
+  HAL_Delay(10);
 
   printf("while(1) start\n");
+  HAL_Delay(10);
 
   /* USER CODE END 2 */
 
@@ -567,7 +575,7 @@ static void MX_TIM1_Init(void)
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
   sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
@@ -826,6 +834,7 @@ void  FOC_Interrupt(void)
 	/* FOC Maths */
 
 	/* Set PWM Compare values */
+
 	Set_PWM3(PWM_Max_Count*0.1,PWM_Max_Count*0.2,PWM_Max_Count*0.3);
 
 	/* LED off */
