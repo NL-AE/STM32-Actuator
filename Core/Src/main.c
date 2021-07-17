@@ -34,6 +34,11 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+// Phase Mappings
+#define Phase_A_Ch TIM_CHANNEL_3
+#define Phase_B_Ch TIM_CHANNEL_1
+#define Phase_C_Ch TIM_CHANNEL_2
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,6 +61,14 @@ TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
 
+// ADC
+uint32_t ADC_3_Reading[3];						// Array for ADC 3 DMA requests
+float	 Temp_Board_C, V_Bat, Phase_Cur_ABC[3];	// Board temp, V battery, phase currents (in order A, B, C)
+// Encoder
+float ENC_Ang = 0;			// Encoder angle
+float ENC_Vel = 0;			// Encoder velocity
+int16_t ENC_IIF_Count = 0;	// Encoder IIF count
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,6 +88,15 @@ static void MX_SPI2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// For SWD debug port 0 printf()
+int _write(int file, char *ptr, int len)
+{
+	int i=0;
+	for(i=0; i<len;i++)
+		ITM_SendChar((*ptr++));
+	return len;
+}
 
 /* USER CODE END 0 */
 
@@ -115,6 +137,44 @@ int main(void)
   MX_SPI1_Init();
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
+
+  /* Start ADCs */
+  printf("Start ADC... ");
+  HAL_ADC_Start(&hadc1);
+  HAL_ADC_Start(&hadc2);
+  HAL_ADC_Start_DMA(&hadc3, ADC_3_Reading, 3);
+  printf("Good\n");
+
+  /* Startup PWM */
+  printf("Start PWM... ");
+  HAL_TIM_Base_Start_IT(&htim1);			// Start timer 1
+  HAL_TIM_PWM_Start(&htim1, Phase_A_Ch);
+  HAL_TIM_PWM_Start(&htim1, Phase_B_Ch);
+  HAL_TIM_PWM_Start(&htim1, Phase_C_Ch);
+  Set_PWM3(0,0,0);							// Set PWM channels to off
+  printf("Good\n");
+
+  /* Startup DRV chip */
+  printf("Start DRV... ");
+  //  int DRV_Err = DRV_Start();		// startup and write SPI registers
+  //  if(DRV_Err){						// if errors occurs,
+  //    printf("Error: %i\n",DRV_Err);	// printf
+  //    //while(1);
+  //  }
+  printf("Good\n");
+
+  /* Check Encoder talks */
+  printf("Start ENC... ");
+  //  Read_Encoder_SPI_Ang(&ENC_Ang);
+  //  int Enc_Err = Read_Encoder_SPI_Ang(&ENC_Ang);		// read one value from encoders
+  //  if(Enc_Err){										// if errors occurs,
+  //  	  printf("Error: %i\n",Enc_Err);					// printf
+  //  	  //while(1);
+  //  }
+  //  ENC_IIF_Count = (int)(ENC_Ang /360.0 * 4095.0);	// Zero encoder
+  printf("Good\n");
+
+  printf("while(1) start\n");
 
   /* USER CODE END 2 */
 
@@ -616,9 +676,175 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(DRV_EN_GPIO_Port, &GPIO_InitStruct);
 
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
 }
 
 /* USER CODE BEGIN 4 */
+
+// DRV
+int   DRV_SPI_Transmit_Check(uint16_t TX_Data, uint16_t RSVD_Mask)
+{
+	uint8_t SPI_Data[2];	// to transmit
+	uint8_t SPI_Buff[2];	// recieve buffer
+
+	// Transmit
+	SPI_Data[0] = (TX_Data>>8)&0b01111111;	// first split data up into 8 bits and make it a write command
+	SPI_Data[1] = TX_Data;
+	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 0);
+	HAL_SPI_Transmit(&hspi2,(uint8_t*)&SPI_Data,2,1);
+	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1);
+	HAL_Delay(1);
+
+	// Recieve
+	SPI_Data[0] = (TX_Data>>8)|0b10000000;	// first split data up into 8 bits and make it a read command
+	SPI_Data[1] = TX_Data;
+	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 0);
+	HAL_SPI_TransmitReceive(&hspi2,(uint8_t*)&SPI_Data,SPI_Buff,2,1);
+	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1);
+	HAL_Delay(1);
+
+	//printf("%i%i%i  %i%i%i%i %i%i%i%i\n",(int)(SPI_Buff[0]>>2&1UL) ,(int)(SPI_Buff[0]>>1&1UL) ,(int)(SPI_Buff[0]>>0&1UL) ,(int)(SPI_Buff[1]>>7&1UL) ,(int)(SPI_Buff[1]>>6&1UL) ,(int)(SPI_Buff[1]>>5&1UL) ,(int)(SPI_Buff[1]>>4&1UL) ,(int)(SPI_Buff[1]>>3&1UL) ,(int)(SPI_Buff[1]>>2&1UL) ,(int)(SPI_Buff[1]>>1&1UL) ,(int)(SPI_Buff[1]>>0&1UL) );
+
+	if((((SPI_Data[0]^SPI_Buff[0])&((int)(RSVD_Mask>>8)))==0) && (((SPI_Data[1]^SPI_Buff[1])&((int)RSVD_Mask))==0))	// XOR compare written to read data
+		return 0;	// if they are the same, return 0
+		else
+		return 1;	// if they are not same, return 1
+}
+int   DRV_Start(void)
+{
+	HAL_GPIO_WritePin(DRV_EN_GPIO_Port, DRV_EN_Pin, 1);	// Set enable of drv chip high
+	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1);
+
+	//printf("\n");
+
+	//printf("0x5 Register:  ");
+	if(DRV_SPI_Transmit_Check(0b0010101101000100,0x03FF)) return 1;	// write 0x5 register : HS gate 1780ns peak source time, 60mA sink, 50mA source
+	//printf("0x6 Register:  ");
+	if(DRV_SPI_Transmit_Check(0b0011001101000100,0x03FF)) return 2;	// write 0x6 register : LS gate 1780ns peak source time, 60mA sink, 50mA source
+	//printf("0x7 Register:  ");
+	if(DRV_SPI_Transmit_Check(0b0011101010010110,0x03FF)) return 3;	// write 0x7 register : Active freewheeling, 3 channel PWM, 52ns dead time, 1.75us Vds sense, 3.5us Vds deglitch
+	//printf("0x9 Register:  ");
+	if(DRV_SPI_Transmit_Check(0b0100110010100000,0x07FF)) return 3;	// write 0x9 register : Clamp sense output to 3.3V, faults all enabled
+	//printf("0xA Register:  ");
+	if(DRV_SPI_Transmit_Check(0b0101000010101010,0x07FF)) return 4;	// write 0xA register : Normal operation, 2.5us amp blanking time, 40 gain
+	//printf("0xB Register:  ");
+	if(DRV_SPI_Transmit_Check(0b0101100100001010,0x031F)) return 5;	// write 0xB register : k=2, 10us Vreg power down down delay, UVLO at Vreg*0.7
+	//printf("0xC Register:  ");
+	if(DRV_SPI_Transmit_Check(0b0110000000000000,0x00FF)) return 6;	// write 0xC register : Vds threshold=60mV, Vds overcurrent latch shut down
+
+  //if(DRV_SPI_Transmit_Check(0b0101011110101010,0x00FF)) return 7;	// write 0xC register : DC calibration mode, 2.5us amp blanking time, 40 gain
+
+	return 0;
+}
+/*
+void  DRV_Error(void)
+{
+	printf("DRV Error\n");
+
+	// Read errors
+	uint8_t SPI_Data[2];
+	uint8_t SPI_Buff[2];
+
+	for(int i=1; i<=4; i++)
+	{
+		SPI_Data[0] = 0b10000000 | (i<<11);	// Create read command
+
+		HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 0);
+		HAL_SPI_TransmitReceive(&hspi2,(uint8_t*)&SPI_Data,SPI_Buff,2,1);
+		HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1);
+		//HAL_Delay(1);
+
+		printf("0x%x Register:  %i%i%i  %i%i%i%i %i%i%i%i\n",i,(int)(SPI_Buff[0]>>2&1UL) ,(int)(SPI_Buff[0]>>1&1UL) ,(int)(SPI_Buff[0]>>0&1UL) ,(int)(SPI_Buff[1]>>7&1UL) ,(int)(SPI_Buff[1]>>6&1UL) ,(int)(SPI_Buff[1]>>5&1UL) ,(int)(SPI_Buff[1]>>4&1UL) ,(int)(SPI_Buff[1]>>3&1UL) ,(int)(SPI_Buff[1]>>2&1UL) ,(int)(SPI_Buff[1]>>1&1UL) ,(int)(SPI_Buff[1]>>0&1UL) );
+	}
+}*/
+// Read ADCs
+void  Read_ADCs(float*Cur_Phase_A, float*Cur_Phase_B, float*Cur_Phase_C, float*V_Bat, float*Temp_Board_C)
+{
+	// LM60: V_o = (6.25mV * T/C) + 424mV
+	#define Temp_V_Offset 	0.424
+	#define Temp_Slope 		0.00625
+
+	// V1: V_o = Vin * R2 / (R1+R2)
+	#define V_bat_R_Top 	75.0
+	#define V_bat_R_Bot 	5.1
+
+	// 1V on the amp output = 25A
+	#define V_to_Amps_Const	25
+
+	HAL_ADC_Start(&hadc1);
+	HAL_ADC_PollForConversion(&hadc1, 1);
+
+	*Cur_Phase_A 	= ((float)HAL_ADC_GetValue(&hadc1))*3.3/4095.0*V_to_Amps_Const;
+	*Cur_Phase_B 	= (float)HAL_ADC_GetValue(&hadc2)*3.3/4095.0*V_to_Amps_Const;
+	*Cur_Phase_C 	= (float)ADC_3_Reading[0]*3.3/4095.0*V_to_Amps_Const;
+	*V_Bat			= (float)ADC_3_Reading[1]*3.3/4095.0 / V_bat_R_Bot * (V_bat_R_Bot+V_bat_R_Top);
+    *Temp_Board_C	= ((((float)ADC_3_Reading[2])*3.3/4095.0)-Temp_V_Offset)/Temp_Slope;
+}
+// Encoder
+int   Read_Encoder_SPI_Ang(float*Angle)
+{
+	const uint8_t ENC_ASK_POS [2] = {0b10000000,0b00100000};	// Command for asking position
+	uint8_t ENC_SPI_Buffer[4];
+
+	//HAL_SPI_Transmit(&hspi1, (uint8_t*)&ENC_ASK_POS,   2, 1);
+	//HAL_SPI_Receive (&hspi1, (uint8_t*)ENC_SPI_Buffer, 3, 1);
+
+	if(HAL_SPI_Transmit(&hspi1, (uint8_t*)&ENC_ASK_POS,   2, 1)) return 1;	// Ask for data
+	if(HAL_SPI_Receive (&hspi1, (uint8_t*)ENC_SPI_Buffer, 3, 1)) return 2;	// Recieve 2 bytes of data
+
+	int16_t SPI_ANG = (ENC_SPI_Buffer[1] << 8 | ENC_SPI_Buffer[2]);		// make 16 bit
+	int16_t ANG_VAL = (0b0011111111111111 & SPI_ANG);					// keep last 14 bits
+	ANG_VAL -= (((SPI_ANG)&(1UL<<(14)))>>(14))*(-16384);
+	*Angle = 360.0/32768.0 * ANG_VAL;
+
+	return 0;
+}
+// FOC
+void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3)
+{
+	__HAL_TIM_SET_COMPARE(&htim1,Phase_A_Ch,ARR_1);	// Set PWM channels
+	__HAL_TIM_SET_COMPARE(&htim1,Phase_B_Ch,ARR_2);
+	__HAL_TIM_SET_COMPARE(&htim1,Phase_C_Ch,ARR_3);
+}
+float _SIN(float theta)
+{
+	return 0;
+}
+// Interrupts
+void  FOC_Interrupt(void)
+{
+	/* LED on */
+	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 1);
+
+	ENC_Ang = (float)(ENC_IIF_Count/4095.0*360.0);
+
+	/* Read ADCs */
+	Read_ADCs(&Phase_Cur_ABC[0],&Phase_Cur_ABC[1],&Phase_Cur_ABC[2], &V_Bat, &Temp_Board_C);
+
+	/* FOC Maths */
+
+	/* Set PWM Compare values */
+	Set_PWM3(PWM_Max_Count*0.1,PWM_Max_Count*0.2,PWM_Max_Count*0.3);
+
+	/* LED off */
+	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 0);
+}
+void  IF_B_Int(void)
+{
+	if(HAL_GPIO_ReadPin(IF_A_GPIO_Port, IF_A_Pin))
+		if(ENC_IIF_Count>=4095)
+			ENC_IIF_Count = 0;
+		else
+			ENC_IIF_Count++;
+	else
+		if(ENC_IIF_Count<=0)
+			ENC_IIF_Count = 4095;
+		else
+			ENC_IIF_Count--;
+}
 
 /* USER CODE END 4 */
 

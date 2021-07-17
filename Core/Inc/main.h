@@ -43,6 +43,13 @@ extern "C" {
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
 
+// FOC related
+#define SQRT3 		1.73205080757f
+#define SQRT3_2		0.86602540378f
+#define SQRT1_3		0.57735026919f
+#define PI_F 		3.14159274101f
+#define PWM_Max_Count htim1.Init.Period
+
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/
@@ -57,13 +64,24 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
 
+// DRV Chip
+int DRV_SPI_Transmit_Check(uint16_t,uint16_t);				// custom SPI transmit and check
+int DRV_Start(void);										// sends over SPI commands to setup
+//void DRV_Error(void);										// when NFAULT error occurs
+// ADC
+void Read_ADCs(float*, float*, float*, float*, float*);		// reads ADCs and returns in those pointers
+// Encoder
+int Read_Encoder_SPI_Ang(float*);					// ask for encoder angle over SPI
+// FOC stuff
+void Set_PWM3(uint16_t, uint16_t, uint16_t);		// set pwm values for channels A,B,C
+float _SIN(float);									// sin(theta)
+// Interrupts
+void FOC_Interrupt(void);							// FOC interrupt
+void IF_B_Int(void);		// Phase B interrupt for encoder
+
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define OSC1_Pin GPIO_PIN_0
-#define OSC1_GPIO_Port GPIOH
-#define OSC2_Pin GPIO_PIN_1
-#define OSC2_GPIO_Port GPIOH
 #define TEMP_Pin GPIO_PIN_2
 #define TEMP_GPIO_Port GPIOC
 #define SO3_Pin GPIO_PIN_0
@@ -84,6 +102,7 @@ void Error_Handler(void);
 #define SPI2_CS_GPIO_Port GPIOB
 #define IF_B_Pin GPIO_PIN_6
 #define IF_B_GPIO_Port GPIOC
+#define IF_B_EXTI_IRQn EXTI9_5_IRQn
 #define Phase_B_Pin GPIO_PIN_8
 #define Phase_B_GPIO_Port GPIOA
 #define Phase_C_Pin GPIO_PIN_9
