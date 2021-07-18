@@ -845,7 +845,7 @@ void  FOC_Interrupt(void)
 
 	/* Set PWM Compare values */
 
-	Set_PWM3(PWM_Max_Count*0.1,PWM_Max_Count*0.2,PWM_Max_Count*0.3);
+	Set_PWM3(PWM_Max_Count*0.01,PWM_Max_Count*0.02,PWM_Max_Count*0.03);
 
 	/* LED off */
 	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 0);

@@ -3533,7 +3533,7 @@ void  FOC_Interrupt(void)
 
 	/* Set PWM Compare values */
 
-	Set_PWM3(PWM_Max_Count*0.1,PWM_Max_Count*0.2,PWM_Max_Count*0.3);
+	Set_PWM3(PWM_Max_Count*0.01,PWM_Max_Count*0.02,PWM_Max_Count*0.03);
  8001e1a:	4b32      	ldr	r3, [pc, #200]	; (8001ee4 <FOC_Interrupt+0x124>)
  8001e1c:	68db      	ldr	r3, [r3, #12]
  8001e1e:	4618      	mov	r0, r3
@@ -3593,12 +3593,12 @@ void  FOC_Interrupt(void)
  8001e9e:	bdb0      	pop	{r4, r5, r7, pc}
  8001ea0:	00000000 	.word	0x00000000
  8001ea4:	40affe00 	.word	0x40affe00
- 8001ea8:	9999999a 	.word	0x9999999a
- 8001eac:	3fb99999 	.word	0x3fb99999
- 8001eb0:	9999999a 	.word	0x9999999a
- 8001eb4:	3fc99999 	.word	0x3fc99999
- 8001eb8:	33333333 	.word	0x33333333
- 8001ebc:	3fd33333 	.word	0x3fd33333
+ 8001ea8:	47ae147b 	.word	0x47ae147b
+ 8001eac:	3f847ae1 	.word	0x3f847ae1
+ 8001eb0:	47ae147b 	.word	0x47ae147b
+ 8001eb4:	3f947ae1 	.word	0x3f947ae1
+ 8001eb8:	eb851eb8 	.word	0xeb851eb8
+ 8001ebc:	3f9eb851 	.word	0x3f9eb851
  8001ec0:	40020000 	.word	0x40020000
  8001ec4:	20000090 	.word	0x20000090
  8001ec8:	40768000 	.word	0x40768000
