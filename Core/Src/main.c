@@ -61,6 +61,7 @@ TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
 
+<<<<<<< HEAD
 // ADC
 uint32_t ADC_3_Reading[3];						// Array for ADC 3 DMA requests
 float	 Temp_Board_C, V_Bat, Phase_Cur_ABC[3];	// Board temp, V battery, phase currents (in order A, B, C)
@@ -68,6 +69,28 @@ float	 Temp_Board_C, V_Bat, Phase_Cur_ABC[3];	// Board temp, V battery, phase cu
 float ENC_Ang = 0;			// Encoder angle
 float ENC_Vel = 0;			// Encoder velocity
 int16_t ENC_IIF_Count = 0;	// Encoder IIF count
+=======
+typedef struct{
+	uint32_t DMA_Buff[3];	// Array for ADC 3 DMA requests
+	float Temp_Board_C;		// Temp of board	/C
+	float PVDD;				// Power voltage	/V
+	float i_a, i_b, i_c;	// Phase currents	/amps
+} ADC_Struct;
+
+typedef struct{
+	float theta;		// Encoder angle		/rad
+	float velocity;		// Encoder velocity		/rads-1
+	int16_t IIF_Count;	// Encoder IIF count
+} ENC_Struct;
+
+typedef struct{
+	float theta_mech, theta_elec;	// Mechanical and electrical theta	/rad
+} FOC_Struct;
+
+ADC_Struct adc;
+ENC_Struct enc;
+FOC_Struct foc;
+>>>>>>> parent of b13acec (all strucutres)
 
 /* USER CODE END PV */
 
@@ -140,12 +163,21 @@ int main(void)
 
   printf(" Actuator Firmware Version: 1.0\n");
   HAL_Delay(10);
+<<<<<<< HEAD
+=======
+  printf("Actuator Firmware Version: 1.0\n");
+  HAL_Delay(10);
+>>>>>>> parent of b13acec (all strucutres)
 
   /* Start ADCs */
   printf("Start ADC... ");
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
+<<<<<<< HEAD
   HAL_ADC_Start_DMA(&hadc3, ADC_3_Reading, 3);
+=======
+  HAL_ADC_Start_DMA(&hadc3, adc.DMA_Buff, 3);
+>>>>>>> parent of b13acec (all strucutres)
   printf("Good\n");
   HAL_Delay(10);
 
@@ -171,12 +203,20 @@ int main(void)
 
   /* Check Encoder talks */
   printf("Start ENC... ");
+<<<<<<< HEAD
   int Enc_Err = Read_Encoder_SPI_Ang(&ENC_Ang);		// read one value from encoders
+=======
+  int Enc_Err = Read_Encoder_SPI_Ang(&enc.theta);		// read one value from encoders
+>>>>>>> parent of b13acec (all strucutres)
   if(Enc_Err){										// if errors occurs,
 	  printf("Error: %i\n",Enc_Err);					// printf
 	  //while(1);
   }
+<<<<<<< HEAD
   ENC_IIF_Count = (int)(ENC_Ang /360.0 * 4095.0);	// Zero encoder
+=======
+  enc.IIF_Count = (int)(enc.theta /360.0 * 4095.0);	// Zero encoder
+>>>>>>> parent of b13acec (all strucutres)
   printf("Good\n");
   HAL_Delay(10);
 
@@ -783,6 +823,7 @@ void  Read_ADCs(float*Cur_Phase_A, float*Cur_Phase_B, float*Cur_Phase_C, float*V
 	// LM60: V_o = (6.25mV * T/C) + 424mV
 	#define Temp_V_Offset 	0.424
 	#define Temp_Slope 		0.00625
+<<<<<<< HEAD
 
 	// V1: V_o = Vin * R2 / (R1+R2)
 	#define V_bat_R_Top 	75.0
@@ -791,14 +832,30 @@ void  Read_ADCs(float*Cur_Phase_A, float*Cur_Phase_B, float*Cur_Phase_C, float*V
 	// 1V on the amp output = 25A
 	#define V_to_Amps_Const	25
 
+=======
+
+	// V1: V_o = Vin * R2 / (R1+R2)
+	#define V_bat_R_Top 	75.0
+	#define V_bat_R_Bot 	5.1
+
+	// 1V on the amp output = 25A
+	#define V_to_Amps_Const	25
+
+>>>>>>> parent of b13acec (all strucutres)
 	HAL_ADC_Start(&hadc1);
 	HAL_ADC_PollForConversion(&hadc1, 1);
 
 	*Cur_Phase_A 	= ((float)HAL_ADC_GetValue(&hadc1))*3.3/4095.0*V_to_Amps_Const;
 	*Cur_Phase_B 	= (float)HAL_ADC_GetValue(&hadc2)*3.3/4095.0*V_to_Amps_Const;
+<<<<<<< HEAD
 	*Cur_Phase_C 	= (float)ADC_3_Reading[0]*3.3/4095.0*V_to_Amps_Const;
 	*V_Bat			= (float)ADC_3_Reading[1]*3.3/4095.0 / V_bat_R_Bot * (V_bat_R_Bot+V_bat_R_Top);
     *Temp_Board_C	= ((((float)ADC_3_Reading[2])*3.3/4095.0)-Temp_V_Offset)/Temp_Slope;
+=======
+	*Cur_Phase_C 	= (float)adc.DMA_Buff[0]*3.3/4095.0*V_to_Amps_Const;
+	*V_Bat			= (float)adc.DMA_Buff[1]*3.3/4095.0 / V_bat_R_Bot * (V_bat_R_Bot+V_bat_R_Top);
+    *Temp_Board_C	= ((((float)adc.DMA_Buff[2])*3.3/4095.0)-Temp_V_Offset)/Temp_Slope;
+>>>>>>> parent of b13acec (all strucutres)
 }
 // Encoder
 int   Read_Encoder_SPI_Ang(float*Angle)
@@ -836,6 +893,7 @@ void  FOC_Interrupt(void)
 	/* LED on */
 	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 1);
 
+<<<<<<< HEAD
 	ENC_Ang = (float)(ENC_IIF_Count/4095.0*360.0);
 
 	/* Read ADCs */
@@ -845,6 +903,15 @@ void  FOC_Interrupt(void)
 
 	/* Set PWM Compare values */
 
+=======
+	/* Read ADCs */
+	Read_ADCs(&adc.i_a,&adc.i_b,&adc.i_c, &adc.PVDD, &adc.Temp_Board_C);
+
+	/* FOC Maths */
+	enc.theta = (float)(enc.IIF_Count/4095.0*360.0);
+
+	/* Set PWM Compare values */
+>>>>>>> parent of b13acec (all strucutres)
 	Set_PWM3(PWM_Max_Count*0.01,PWM_Max_Count*0.02,PWM_Max_Count*0.03);
 
 	/* LED off */
@@ -853,6 +920,7 @@ void  FOC_Interrupt(void)
 void  IF_B_Int(void)
 {
 	if(HAL_GPIO_ReadPin(IF_A_GPIO_Port, IF_A_Pin))
+<<<<<<< HEAD
 		if(ENC_IIF_Count>=4095)
 			ENC_IIF_Count = 0;
 		else
@@ -862,6 +930,17 @@ void  IF_B_Int(void)
 			ENC_IIF_Count = 4095;
 		else
 			ENC_IIF_Count--;
+=======
+		if(enc.IIF_Count>=4095)
+			enc.IIF_Count = 0;
+		else
+			enc.IIF_Count++;
+	else
+		if(enc.IIF_Count<=0)
+			enc.IIF_Count = 4095;
+		else
+			enc.IIF_Count--;
+>>>>>>> parent of b13acec (all strucutres)
 }
 
 /* USER CODE END 4 */
