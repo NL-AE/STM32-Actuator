@@ -68,8 +68,7 @@ typedef struct{
 } ENC_Struct;
 
 typedef struct{
-	uint32_t DMA_Buff[3];	// Array for ADC 3 DMA requests
-
+	uint32_t DMA_Buff[3];						// Array for ADC 3 DMA requests
 	float PVDD, V_bat_R_Bot, V_bat_R_Top;		// Temp_V_Offset/V 	and Resistor divider for PVDD
 	float Temp, Temp_V_Offset, Temp_Slope;		// Board temp 		and thermocouple properties
 
@@ -172,7 +171,7 @@ int main(void)
   printf("Start ADC... ");
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
-  HAL_ADC_Start_DMA(&hadc3,adc.DMA_Buff,3);
+  HAL_ADC_Start_DMA(&hadc3,(uint32_t*)adc.DMA_Buff,3);
   printf("Good\n");
   HAL_Delay(10);
 
@@ -230,14 +229,19 @@ int main(void)
   // Look for PWM register max
   foc.PWM_Reg_Max = htim1.Init.Period;
 
+  printf("FOC Start\n");
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  /* Heartbeat */
+//	  HAL_GPIO_WritePin(G_LED_GPIO_Port, G_LED_Pin, 1);
 	  HAL_GPIO_TogglePin(G_LED_GPIO_Port, G_LED_Pin);
 
+	  // Read if there is an error
 	  if(HAL_GPIO_ReadPin(DRV_FAULT_GPIO_Port, DRV_FAULT_Pin)==0)
 		  DRV_Error();
 
@@ -245,6 +249,8 @@ int main(void)
 	  ADC_Filter_Misc(adc.PVDD_Raw,adc.Temp_Raw,&adc.PVDD_Fil,&adc.Temp_Fil);
 	  // Normalise PVDD and temp
 	  ADC_Norm_Misc(adc.PVDD_Fil,adc.Temp_Fil,&adc.PVDD,&adc.Temp);
+
+//	  HAL_GPIO_WritePin(G_LED_GPIO_Port, G_LED_Pin, 0);
 
 	  HAL_Delay(100);
     /* USER CODE END WHILE */
@@ -320,7 +326,7 @@ static void MX_ADC1_Init(void)
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = DISABLE;
+  hadc1.Init.ScanConvMode = ENABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
@@ -328,7 +334,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 1;
   hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
     Error_Handler();
@@ -379,13 +385,13 @@ static void MX_ADC2_Init(void)
   hadc2.Instance = ADC2;
   hadc2.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
   hadc2.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc2.Init.ScanConvMode = DISABLE;
+  hadc2.Init.ScanConvMode = ENABLE;
   hadc2.Init.ContinuousConvMode = DISABLE;
   hadc2.Init.DiscontinuousConvMode = DISABLE;
   hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc2.Init.NbrOfConversion = 1;
   hadc2.Init.DMAContinuousRequests = DISABLE;
-  hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc2.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   if (HAL_ADC_Init(&hadc2) != HAL_OK)
   {
     Error_Handler();
@@ -432,7 +438,7 @@ static void MX_ADC3_Init(void)
   hadc3.Init.DiscontinuousConvMode = DISABLE;
   hadc3.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc3.Init.NbrOfConversion = 3;
-  hadc3.Init.DMAContinuousRequests = DISABLE;
+  hadc3.Init.DMAContinuousRequests = ENABLE;
   hadc3.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   if (HAL_ADC_Init(&hadc3) != HAL_OK)
   {
@@ -723,7 +729,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pin = SPI2_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
   HAL_GPIO_Init(SPI2_CS_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : IF_B_Pin */
@@ -832,7 +838,10 @@ void  DRV_Zero_SO(void)
 	int16_t outp_A[5], outp_B[5], outp_C[5];
 
 	for(int i=0; i<5; i++)
+	{
 		ADC_Get_Raw(&temp_A[i],&temp_B[i],&temp_C[i],&temp_PVDD[i],&temp_Temp[i]);
+		HAL_Delay(1);
+	}
 
 	// Sort arrays in ascending order
 	Array_Sort(temp_A,outp_A,5);
@@ -846,7 +855,7 @@ void  DRV_Zero_SO(void)
 	// Set to normal operation again
 	DRV_SPI_Transmit_Check(0b0101000010101010,0x07FF);	// write 0xA register : Normal operation, 2.5us amp blanking time, 40 gain
 }
-void  Array_Sort(int16_t input[], int16_t output[], int n)
+void  Array_Sort (int16_t input[], int16_t output[], int n)
 {
 	for(int i=0; i<n; i++)	// For each element in the input aray,
 	{
