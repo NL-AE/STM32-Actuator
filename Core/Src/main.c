@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdint.h>
 #include <math.h>
 /* USER CODE END Includes */
 
@@ -61,39 +62,39 @@ TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-// ADC
-uint32_t ADC_3_Reading[3];						// Array for ADC 3 DMA requests
-float	 Temp_Board_C, V_Bat, Phase_Cur_ABC[3];	// Board temp, V battery, phase currents (in order A, B, C)
-// Encoder
-float ENC_Ang = 0;			// Encoder angle
-float ENC_Vel = 0;			// Encoder velocity
-int16_t ENC_IIF_Count = 0;	// Encoder IIF count
-=======
-=======
->>>>>>> parent of b13acec (all strucutres)
 typedef struct{
-	uint32_t DMA_Buff[3];	// Array for ADC 3 DMA requests
-	float Temp_Board_C;		// Temp of board	/C
-	float PVDD;				// Power voltage	/V
-	float i_a, i_b, i_c;	// Phase currents	/amps
-} ADC_Struct;
-
-typedef struct{
-	float theta;		// Encoder angle		/rad
-	float velocity;		// Encoder velocity		/rads-1
-	int16_t IIF_Count;	// Encoder IIF count
+	float SPI_theta;		// IIF from SPI
+	int16_t IIF_Count_Raw;	// Encoder IIF counts
 } ENC_Struct;
 
 typedef struct{
-	float theta_mech, theta_elec;	// Mechanical and electrical theta	/rad
+	uint32_t DMA_Buff[3];	// Array for ADC 3 DMA requests
+
+	float PVDD, V_bat_R_Bot, V_bat_R_Top;		// Temp_V_Offset/V 	and Resistor divider for PVDD
+	float Temp, Temp_V_Offset, Temp_Slope;		// Board temp 		and thermocouple properties
+
+	int16_t i_a_Raw, i_b_Raw, i_c_Raw, PVDD_Raw, Temp_Raw;	// Raw ADC readings
+	int16_t i_a_Fil, i_b_Fil, i_c_Fil, PVDD_Fil, Temp_Fil;	// Filtered ADC readings
+
+	int SO_Gain;											// Gain of sense amp
+	int16_t SO_A_Offset, SO_B_Offset, SO_C_Offset;			// Raw offset of sense amp
+} ADC_Struct;
+
+typedef struct{
+	int Pole_Pairs;		// number of pole pairs
+
+	float dt;			// delta T of FOC response	/seconds
+
+	int16_t theta_IFF_Raw, theta_IIF_Fil;	// Copy of current IIF raw and filtered		/rad
+	float dtheta_Raw, dtheta_Fil;			// Raw and filtered velocity				/rads-1
+
+	float i_a, i_b, i_c;			// Phase currents		/amps
+	uint16_t PWM_Reg_Max;			// PWM register max
 } FOC_Struct;
 
-ADC_Struct adc;
 ENC_Struct enc;
+ADC_Struct adc;
 FOC_Struct foc;
->>>>>>> parent of b13acec (all strucutres)
 
 /* USER CODE END PV */
 
@@ -164,38 +165,20 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
 
-  printf(" Actuator Firmware Version: 1.0\n");
   HAL_Delay(10);
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-  printf("Actuator Firmware Version: 1.0\n");
-  HAL_Delay(10);
->>>>>>> parent of b13acec (all strucutres)
-=======
-  printf("Actuator Firmware Version: 1.0\n");
-  HAL_Delay(10);
->>>>>>> parent of b13acec (all strucutres)
+  printf("Actuator Firmware Version: 1.0\n");	HAL_Delay(10);
 
   /* Start ADCs */
   printf("Start ADC... ");
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
-<<<<<<< HEAD
-<<<<<<< HEAD
-  HAL_ADC_Start_DMA(&hadc3, ADC_3_Reading, 3);
-=======
-  HAL_ADC_Start_DMA(&hadc3, adc.DMA_Buff, 3);
->>>>>>> parent of b13acec (all strucutres)
-=======
-  HAL_ADC_Start_DMA(&hadc3, adc.DMA_Buff, 3);
->>>>>>> parent of b13acec (all strucutres)
+  HAL_ADC_Start_DMA(&hadc3,adc.DMA_Buff,3);
   printf("Good\n");
   HAL_Delay(10);
 
   /* Startup PWM */
   printf("Start PWM... ");
-  HAL_TIM_Base_Start_IT(&htim1);			// Start timer 1
+  HAL_TIM_Base_Start_IT(&htim1);
   HAL_TIM_PWM_Start(&htim1, Phase_A_Ch);
   HAL_TIM_PWM_Start(&htim1, Phase_B_Ch);
   HAL_TIM_PWM_Start(&htim1, Phase_C_Ch);
@@ -206,42 +189,46 @@ int main(void)
   /* Startup DRV chip */
   printf("Start DRV... ");
   int DRV_Err = DRV_Start();		// startup and write SPI registers
-  if(DRV_Err){						// if errors occurs,
-	  printf("Error: %i\n",DRV_Err);	// printf
-	  //while(1);
+  if(DRV_Err){							// if errors occurs,
+	  printf("Error: %i\n",DRV_Err);
+	  while(1);
   }
+  DRV_Zero_SO();						// Zero sense amps
   printf("Good\n");
   HAL_Delay(10);
 
   /* Check Encoder talks */
   printf("Start ENC... ");
-<<<<<<< HEAD
-<<<<<<< HEAD
-  int Enc_Err = Read_Encoder_SPI_Ang(&ENC_Ang);		// read one value from encoders
-=======
-  int Enc_Err = Read_Encoder_SPI_Ang(&enc.theta);		// read one value from encoders
->>>>>>> parent of b13acec (all strucutres)
-=======
-  int Enc_Err = Read_Encoder_SPI_Ang(&enc.theta);		// read one value from encoders
->>>>>>> parent of b13acec (all strucutres)
-  if(Enc_Err){										// if errors occurs,
-	  printf("Error: %i\n",Enc_Err);					// printf
-	  //while(1);
+  int Enc_Err = Read_Encoder_SPI_Ang(&enc.SPI_theta);	// read one value from encoders
+  if(Enc_Err){							// if errors occurs,
+	  printf("Error: %i\n",Enc_Err);
+	  while(1);
   }
-<<<<<<< HEAD
-<<<<<<< HEAD
-  ENC_IIF_Count = (int)(ENC_Ang /360.0 * 4095.0);	// Zero encoder
-=======
-  enc.IIF_Count = (int)(enc.theta /360.0 * 4095.0);	// Zero encoder
->>>>>>> parent of b13acec (all strucutres)
-=======
-  enc.IIF_Count = (int)(enc.theta /360.0 * 4095.0);	// Zero encoder
->>>>>>> parent of b13acec (all strucutres)
+  enc.IIF_Count_Raw = (int)(enc.SPI_theta /360.0 * 4095.0);	// Zero encoder
   printf("Good\n");
   HAL_Delay(10);
 
-  printf("while(1) start\n");
-  HAL_Delay(10);
+  /* Setup ADC Constants */
+  // V1: V_o = Vin * R2 / (R1+R2)
+  adc.V_bat_R_Top = 75.0;
+  adc.V_bat_R_Bot = 5.1;
+
+  // LM60: V_o = (6.25mV * T/C) + 424mV
+  adc.Temp_V_Offset = 0.424;
+  adc.Temp_Slope = 0.00625;
+
+  // Set sense amp gain
+  adc.SO_Gain = 40;
+
+  /* Setup FOC Constants*/
+  // Set pole pairs
+  foc.Pole_Pairs = 21;
+
+  // Set FOC response dt
+  foc.dt = 1/((168*1000000) / (htim1.Init.Period+1) / (htim1.Init.RepetitionCounter+1));
+
+  // Look for PWM register max
+  foc.PWM_Reg_Max = htim1.Init.Period;
 
   /* USER CODE END 2 */
 
@@ -249,12 +236,16 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  HAL_GPIO_TogglePin(G_LED_GPIO_Port, G_LED_Pin);
 
 	  if(HAL_GPIO_ReadPin(DRV_FAULT_GPIO_Port, DRV_FAULT_Pin)==0)
 		  DRV_Error();
 
-//	  HAL_GPIO_TogglePin(Y_LED_GPIO_Port, Y_LED_Pin);
-	  HAL_GPIO_TogglePin(G_LED_GPIO_Port, G_LED_Pin);
+	  // Filter raw ADC PVDD and temp
+	  ADC_Filter_Misc(adc.PVDD_Raw,adc.Temp_Raw,&adc.PVDD_Fil,&adc.Temp_Fil);
+	  // Normalise PVDD and temp
+	  ADC_Norm_Misc(adc.PVDD_Fil,adc.Temp_Fil,&adc.PVDD,&adc.Temp);
+
 	  HAL_Delay(100);
     /* USER CODE END WHILE */
 
@@ -791,33 +782,22 @@ int   DRV_SPI_Transmit_Check(uint16_t TX_Data, uint16_t RSVD_Mask)
 		else
 		return 1;	// if they are not same, return 1
 }
-int   DRV_Start(void)
+int   DRV_Start  (void)
 {
 	HAL_GPIO_WritePin(DRV_EN_GPIO_Port, DRV_EN_Pin, 1);	// Set enable of drv chip high
 	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1);
 
-	//printf("\n");
-
-	//printf("0x5 Register:  ");
 	if(DRV_SPI_Transmit_Check(0b0010101101000100,0x03FF)) return 1;	// write 0x5 register : HS gate 1780ns peak source time, 60mA sink, 50mA source
-	//printf("0x6 Register:  ");
 	if(DRV_SPI_Transmit_Check(0b0011001101000100,0x03FF)) return 2;	// write 0x6 register : LS gate 1780ns peak source time, 60mA sink, 50mA source
-	//printf("0x7 Register:  ");
 	if(DRV_SPI_Transmit_Check(0b0011101010010110,0x03FF)) return 3;	// write 0x7 register : Active freewheeling, 3 channel PWM, 52ns dead time, 1.75us Vds sense, 3.5us Vds deglitch
-	//printf("0x9 Register:  ");
 	if(DRV_SPI_Transmit_Check(0b0100110010100000,0x07FF)) return 3;	// write 0x9 register : Clamp sense output to 3.3V, faults all enabled
-	//printf("0xA Register:  ");
 	if(DRV_SPI_Transmit_Check(0b0101000010101010,0x07FF)) return 4;	// write 0xA register : Normal operation, 2.5us amp blanking time, 40 gain
-	//printf("0xB Register:  ");
 	if(DRV_SPI_Transmit_Check(0b0101100100001010,0x031F)) return 5;	// write 0xB register : k=2, 10us Vreg power down down delay, UVLO at Vreg*0.7
-	//printf("0xC Register:  ");
 	if(DRV_SPI_Transmit_Check(0b0110000000000000,0x00FF)) return 6;	// write 0xC register : Vds threshold=60mV, Vds overcurrent latch shut down
-
-  //if(DRV_SPI_Transmit_Check(0b0101011110101010,0x00FF)) return 7;	// write 0xC register : DC calibration mode, 2.5us amp blanking time, 40 gain
 
 	return 0;
 }
-void  DRV_Error(void)
+void  DRV_Error  (void)
 {
 	printf("DRV Error\n");
 
@@ -837,62 +817,90 @@ void  DRV_Error(void)
 		printf("0x%x Register:  %i%i%i  %i%i%i%i %i%i%i%i\n",i,(int)(SPI_Buff[0]>>2&1UL) ,(int)(SPI_Buff[0]>>1&1UL) ,(int)(SPI_Buff[0]>>0&1UL) ,(int)(SPI_Buff[1]>>7&1UL) ,(int)(SPI_Buff[1]>>6&1UL) ,(int)(SPI_Buff[1]>>5&1UL) ,(int)(SPI_Buff[1]>>4&1UL) ,(int)(SPI_Buff[1]>>3&1UL) ,(int)(SPI_Buff[1]>>2&1UL) ,(int)(SPI_Buff[1]>>1&1UL) ,(int)(SPI_Buff[1]>>0&1UL) );
 	}
 }
-// Read ADCs
-void  Read_ADCs(float*Cur_Phase_A, float*Cur_Phase_B, float*Cur_Phase_C, float*V_Bat, float*Temp_Board_C)
+void  DRV_Zero_SO(void)
 {
-	// LM60: V_o = (6.25mV * T/C) + 424mV
-	#define Temp_V_Offset 	0.424
-	#define Temp_Slope 		0.00625
-<<<<<<< HEAD
-<<<<<<< HEAD
+	// Turn PWM off
+	Set_PWM3(0,0,0);
 
-	// V1: V_o = Vin * R2 / (R1+R2)
-	#define V_bat_R_Top 	75.0
-	#define V_bat_R_Bot 	5.1
+	// Set to DC calibration mode
+	DRV_SPI_Transmit_Check(0b0101011110101010,0x00FF);	// write 0xC register : DC calibration mode, 2.5us amp blanking time, 40 gain
 
-	// 1V on the amp output = 25A
-	#define V_to_Amps_Const	25
+	HAL_Delay(1);
 
-=======
+	// Take 5 readings
+	int16_t temp_A[5], temp_B[5], temp_C[5], temp_PVDD[5], temp_Temp[5];
+	int16_t outp_A[5], outp_B[5], outp_C[5];
 
-	// V1: V_o = Vin * R2 / (R1+R2)
-	#define V_bat_R_Top 	75.0
-	#define V_bat_R_Bot 	5.1
+	for(int i=0; i<5; i++)
+		ADC_Get_Raw(&temp_A[i],&temp_B[i],&temp_C[i],&temp_PVDD[i],&temp_Temp[i]);
 
-	// 1V on the amp output = 25A
-	#define V_to_Amps_Const	25
+	// Sort arrays in ascending order
+	Array_Sort(temp_A,outp_A,5);
+	Array_Sort(temp_B,outp_B,5);
+	Array_Sort(temp_C,outp_C,5);
 
->>>>>>> parent of b13acec (all strucutres)
-=======
+	adc.SO_A_Offset = (outp_A[1]+outp_A[2]+outp_A[3]) / 3;
+	adc.SO_B_Offset = (outp_B[1]+outp_B[2]+outp_B[3]) / 3;
+	adc.SO_C_Offset = (outp_C[1]+outp_C[2]+outp_C[3]) / 3;
 
-	// V1: V_o = Vin * R2 / (R1+R2)
-	#define V_bat_R_Top 	75.0
-	#define V_bat_R_Bot 	5.1
+	// Set to normal operation again
+	DRV_SPI_Transmit_Check(0b0101000010101010,0x07FF);	// write 0xA register : Normal operation, 2.5us amp blanking time, 40 gain
+}
+void  Array_Sort(int16_t input[], int16_t output[], int n)
+{
+	for(int i=0; i<n; i++)	// For each element in the input aray,
+	{
+		int count=0;
 
-	// 1V on the amp output = 25A
-	#define V_to_Amps_Const	25
+		for(int k=0; k<n; k++)		// Count how many numbers it is larger than
+		{
+			if(input[i]>input[k])
+			{
+				count++;
+			}
+		}
 
->>>>>>> parent of b13acec (all strucutres)
+		while(output[count]==input[i])	// If duplicates, increase index by 1
+		{
+			count = count+1;
+		}
+
+		output[count] = input[i];		// Set the output[count] as input[i]
+	}
+}
+// Read ADCs
+void  ADC_Get_Raw    (int16_t*i_a_Raw, int16_t*i_b_Raw, int16_t*i_c_Raw, int16_t*PVDD_Raw, int16_t*Temp_Raw)
+{
 	HAL_ADC_Start(&hadc1);
 	HAL_ADC_PollForConversion(&hadc1, 1);
 
-	*Cur_Phase_A 	= ((float)HAL_ADC_GetValue(&hadc1))*3.3/4095.0*V_to_Amps_Const;
-	*Cur_Phase_B 	= (float)HAL_ADC_GetValue(&hadc2)*3.3/4095.0*V_to_Amps_Const;
-<<<<<<< HEAD
-<<<<<<< HEAD
-	*Cur_Phase_C 	= (float)ADC_3_Reading[0]*3.3/4095.0*V_to_Amps_Const;
-	*V_Bat			= (float)ADC_3_Reading[1]*3.3/4095.0 / V_bat_R_Bot * (V_bat_R_Bot+V_bat_R_Top);
-    *Temp_Board_C	= ((((float)ADC_3_Reading[2])*3.3/4095.0)-Temp_V_Offset)/Temp_Slope;
-=======
-	*Cur_Phase_C 	= (float)adc.DMA_Buff[0]*3.3/4095.0*V_to_Amps_Const;
-	*V_Bat			= (float)adc.DMA_Buff[1]*3.3/4095.0 / V_bat_R_Bot * (V_bat_R_Bot+V_bat_R_Top);
-    *Temp_Board_C	= ((((float)adc.DMA_Buff[2])*3.3/4095.0)-Temp_V_Offset)/Temp_Slope;
->>>>>>> parent of b13acec (all strucutres)
-=======
-	*Cur_Phase_C 	= (float)adc.DMA_Buff[0]*3.3/4095.0*V_to_Amps_Const;
-	*V_Bat			= (float)adc.DMA_Buff[1]*3.3/4095.0 / V_bat_R_Bot * (V_bat_R_Bot+V_bat_R_Top);
-    *Temp_Board_C	= ((((float)adc.DMA_Buff[2])*3.3/4095.0)-Temp_V_Offset)/Temp_Slope;
->>>>>>> parent of b13acec (all strucutres)
+	*i_a_Raw	= HAL_ADC_GetValue(&hadc1);
+	*i_b_Raw	= HAL_ADC_GetValue(&hadc2);
+	*i_c_Raw	= adc.DMA_Buff[0];
+	*PVDD_Raw	= adc.DMA_Buff[1];
+	*Temp_Raw	= adc.DMA_Buff[2];
+}
+void  ADC_Filter_Curr(int16_t i_a_Raw, int16_t i_b_Raw, int16_t i_c_Raw, int16_t*i_a_Fil, int16_t*i_b_Fil, int16_t*i_c_Fil)
+{
+	*i_a_Fil = i_a_Raw;
+	*i_b_Fil = i_b_Raw;
+	*i_c_Fil = i_c_Raw;
+}
+void  ADC_Norm_Curr  (int16_t i_a_Fil, int16_t i_b_Fil, int16_t i_c_Fil, float*i_a, float*i_b, float*i_c)
+{
+	*i_a 	= ((float)(i_a_Fil-adc.SO_A_Offset))*3.3/4095.0*adc.SO_Gain;
+	*i_b 	= ((float)(i_b_Fil-adc.SO_B_Offset))*3.3/4095.0*adc.SO_Gain;
+	*i_c 	= ((float)(i_c_Fil-adc.SO_C_Offset))*3.3/4095.0*adc.SO_Gain;
+}
+void  ADC_Filter_Misc(int16_t PVDD_Raw, int16_t Temp_Raw, int16_t*PVDD_Fil, int16_t*Temp_Fil)
+{
+	*PVDD_Fil = PVDD_Raw;
+	*Temp_Fil = Temp_Raw;
+}
+void  ADC_Norm_Misc  (int16_t PVDD_Fil, int16_t Temp_Fil, float*PVDD, float*Temp)
+{
+	*PVDD = (float)PVDD_Fil*3.3/4095.0 / adc.V_bat_R_Bot * (adc.V_bat_R_Bot+adc.V_bat_R_Top);
+	*Temp = (((float)Temp_Fil*3.3/4095.0)-adc.Temp_V_Offset)/adc.Temp_Slope;
 }
 // Encoder
 int   Read_Encoder_SPI_Ang(float*Angle)
@@ -913,6 +921,19 @@ int   Read_Encoder_SPI_Ang(float*Angle)
 
 	return 0;
 }
+void  IF_B_Int(void)
+{
+	if(HAL_GPIO_ReadPin(IF_A_GPIO_Port, IF_A_Pin))
+		if(enc.IIF_Count_Raw>=4095)
+			enc.IIF_Count_Raw = 0;
+		else
+			enc.IIF_Count_Raw++;
+	else
+		if(enc.IIF_Count_Raw<=0)
+			enc.IIF_Count_Raw = 4095;
+		else
+			enc.IIF_Count_Raw--;
+}
 // FOC
 void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3)
 {
@@ -924,76 +945,30 @@ float _SIN(float theta)
 {
 	return 0;
 }
-// Interrupts
+// Timer Interrupts
 void  FOC_Interrupt(void)
 {
 	/* LED on */
 	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 1);
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-	ENC_Ang = (float)(ENC_IIF_Count/4095.0*360.0);
+	/* FOC Sample */
+	ADC_Get_Raw(&adc.i_a_Raw,&adc.i_b_Raw,&adc.i_c_Raw, &adc.PVDD_Raw, &adc.Temp_Raw);	// Read raw ADC
+	foc.theta_IFF_Raw = enc.IIF_Count_Raw;												// Save copy of current IIF count
 
-	/* Read ADCs */
-	Read_ADCs(&Phase_Cur_ABC[0],&Phase_Cur_ABC[1],&Phase_Cur_ABC[2], &V_Bat, &Temp_Board_C);
+	// Filter raw ADC currents
+	ADC_Filter_Curr(adc.i_a_Raw,adc.i_b_Raw,adc.i_c_Raw,&adc.i_a_Fil,&adc.i_b_Fil,&adc.i_c_Fil);
 
-	/* FOC Maths */
-
-	/* Set PWM Compare values */
-
-=======
-	/* Read ADCs */
-	Read_ADCs(&adc.i_a,&adc.i_b,&adc.i_c, &adc.PVDD, &adc.Temp_Board_C);
+	// Normalise currents
+	ADC_Norm_Curr(adc.i_a_Fil,adc.i_b_Fil,adc.i_c_Fil,&foc.i_a,&foc.i_b,&foc.i_c);
 
 	/* FOC Maths */
-	enc.theta = (float)(enc.IIF_Count/4095.0*360.0);
+
 
 	/* Set PWM Compare values */
->>>>>>> parent of b13acec (all strucutres)
-=======
-	/* Read ADCs */
-	Read_ADCs(&adc.i_a,&adc.i_b,&adc.i_c, &adc.PVDD, &adc.Temp_Board_C);
-
-	/* FOC Maths */
-	enc.theta = (float)(enc.IIF_Count/4095.0*360.0);
-
-	/* Set PWM Compare values */
->>>>>>> parent of b13acec (all strucutres)
-	Set_PWM3(PWM_Max_Count*0.01,PWM_Max_Count*0.02,PWM_Max_Count*0.03);
+	Set_PWM3(foc.PWM_Reg_Max*0.01,foc.PWM_Reg_Max*0.02,foc.PWM_Reg_Max*0.03);
 
 	/* LED off */
 	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 0);
-}
-void  IF_B_Int(void)
-{
-	if(HAL_GPIO_ReadPin(IF_A_GPIO_Port, IF_A_Pin))
-<<<<<<< HEAD
-<<<<<<< HEAD
-		if(ENC_IIF_Count>=4095)
-			ENC_IIF_Count = 0;
-		else
-			ENC_IIF_Count++;
-	else
-		if(ENC_IIF_Count<=0)
-			ENC_IIF_Count = 4095;
-		else
-			ENC_IIF_Count--;
-=======
-=======
->>>>>>> parent of b13acec (all strucutres)
-		if(enc.IIF_Count>=4095)
-			enc.IIF_Count = 0;
-		else
-			enc.IIF_Count++;
-	else
-		if(enc.IIF_Count<=0)
-			enc.IIF_Count = 4095;
-		else
-			enc.IIF_Count--;
-<<<<<<< HEAD
->>>>>>> parent of b13acec (all strucutres)
-=======
->>>>>>> parent of b13acec (all strucutres)
 }
 
 /* USER CODE END 4 */

@@ -65,19 +65,25 @@ void Error_Handler(void);
 /* USER CODE BEGIN EFP */
 
 // DRV Chip
-int DRV_SPI_Transmit_Check(uint16_t,uint16_t);				// custom SPI transmit and check
-int DRV_Start(void);										// sends over SPI commands to setup
-void DRV_Error(void);										// when NFAULT error occurs
+int   DRV_SPI_Transmit_Check(uint16_t TX_Data, uint16_t RSVD_Mask);
+int   DRV_Start(void);
+void  DRV_Error(void);
+void  DRV_Zero_SO(void);
+void  Array_Sort(int16_t input[], int16_t output[], int n);
 // ADC
-void Read_ADCs(float*, float*, float*, float*, float*);		// reads ADCs and returns in those pointers
+void  ADC_Get_Raw    (int16_t*i_a_Raw, int16_t*i_b_Raw, int16_t*i_c_Raw, int16_t*PVDD_Raw, int16_t*Temp_Raw);
+void  ADC_Filter_Curr(int16_t i_a_Raw, int16_t i_b_Raw, int16_t i_c_Raw, int16_t*i_a_Fil, int16_t*i_b_Fil, int16_t*i_c_Fil);
+void  ADC_Norm_Curr  (int16_t i_a_Fil, int16_t i_b_Fil, int16_t i_c_Fil, float*i_a, float*i_b, float*i_c);
+void  ADC_Filter_Misc(int16_t PVDD_Raw, int16_t Temp_Raw, int16_t*PVDD_Fil, int16_t*Temp_Fil);
+void  ADC_Norm_Misc  (int16_t PVDD_Fil, int16_t Temp_Fil, float*PVDD, float*Temp);
 // Encoder
-int Read_Encoder_SPI_Ang(float*);					// ask for encoder angle over SPI
+int   Read_Encoder_SPI_Ang(float*Angle);
+void  IF_B_Int(void);
 // FOC stuff
-void Set_PWM3(uint16_t, uint16_t, uint16_t);		// set pwm values for channels A,B,C
-float _SIN(float);									// sin(theta)
+void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3);
+float _SIN(float);
 // Interrupts
-void FOC_Interrupt(void);							// FOC interrupt
-void IF_B_Int(void);		// Phase B interrupt for encoder
+void  FOC_Interrupt(void);
 
 /* USER CODE END EFP */
 
