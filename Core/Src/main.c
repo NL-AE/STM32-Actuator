@@ -68,6 +68,7 @@ typedef struct{
 } ENC_Struct;
 
 typedef struct{
+	float VDDA;
 	uint32_t DMA_Buff[3];						// Array for ADC 3 DMA requests
 	float PVDD, V_bat_R_Bot, V_bat_R_Top;		// Temp_V_Offset/V 	and Resistor divider for PVDD
 	float Temp, Temp_V_Offset, Temp_Slope;		// Board temp 		and thermocouple properties
@@ -75,8 +76,9 @@ typedef struct{
 	int16_t i_a_Raw, i_b_Raw, i_c_Raw, PVDD_Raw, Temp_Raw;	// Raw ADC readings
 	int16_t i_a_Fil, i_b_Fil, i_c_Fil, PVDD_Fil, Temp_Fil;	// Filtered ADC readings
 
-	int SO_Gain;											// Gain of sense amp
-	int16_t SO_A_Offset, SO_B_Offset, SO_C_Offset;			// Raw offset of sense amp
+	float R_Shunt_Res;								// Shunt resistor resistance /ohms
+	int SO_Gain;									// Gain of sense amp
+	int16_t SO_A_Offset, SO_B_Offset, SO_C_Offset;	// Raw offset of sense amp
 } ADC_Struct;
 
 typedef struct{
@@ -208,6 +210,8 @@ int main(void)
   HAL_Delay(10);
 
   /* Setup ADC Constants */
+  // Actually 3.25V not 3.3V
+  adc.VDDA = 3.25;
   // V1: V_o = Vin * R2 / (R1+R2)
   adc.V_bat_R_Top = 75.0;
   adc.V_bat_R_Bot = 5.1;
@@ -216,6 +220,8 @@ int main(void)
   adc.Temp_V_Offset = 0.424;
   adc.Temp_Slope = 0.00625;
 
+  // Shunt resistor resistance
+  adc.R_Shunt_Res = 0.001;
   // Set sense amp gain
   adc.SO_Gain = 40;
 
@@ -352,7 +358,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_8;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -400,7 +406,7 @@ static void MX_ADC2_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_15;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -448,7 +454,7 @@ static void MX_ADC3_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -897,9 +903,9 @@ void  ADC_Filter_Curr(int16_t i_a_Raw, int16_t i_b_Raw, int16_t i_c_Raw, int16_t
 }
 void  ADC_Norm_Curr  (int16_t i_a_Fil, int16_t i_b_Fil, int16_t i_c_Fil, float*i_a, float*i_b, float*i_c)
 {
-	*i_a 	= ((float)(i_a_Fil-adc.SO_A_Offset))*3.3/4095.0*adc.SO_Gain;
-	*i_b 	= ((float)(i_b_Fil-adc.SO_B_Offset))*3.3/4095.0*adc.SO_Gain;
-	*i_c 	= ((float)(i_c_Fil-adc.SO_C_Offset))*3.3/4095.0*adc.SO_Gain;
+	*i_a 	= (((float)(i_a_Fil-adc.SO_A_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
+	*i_b 	= (((float)(i_b_Fil-adc.SO_B_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
+	*i_c 	= (((float)(i_c_Fil-adc.SO_C_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
 }
 void  ADC_Filter_Misc(int16_t PVDD_Raw, int16_t Temp_Raw, int16_t*PVDD_Fil, int16_t*Temp_Fil)
 {
@@ -908,8 +914,8 @@ void  ADC_Filter_Misc(int16_t PVDD_Raw, int16_t Temp_Raw, int16_t*PVDD_Fil, int1
 }
 void  ADC_Norm_Misc  (int16_t PVDD_Fil, int16_t Temp_Fil, float*PVDD, float*Temp)
 {
-	*PVDD = (float)PVDD_Fil*3.3/4095.0 / adc.V_bat_R_Bot * (adc.V_bat_R_Bot+adc.V_bat_R_Top);
-	*Temp = (((float)Temp_Fil*3.3/4095.0)-adc.Temp_V_Offset)/adc.Temp_Slope;
+	*PVDD = (float)PVDD_Fil*adc.VDDA/4095.0 / adc.V_bat_R_Bot * (adc.V_bat_R_Bot+adc.V_bat_R_Top);
+	*Temp = (((float)Temp_Fil*adc.VDDA/4095.0)-adc.Temp_V_Offset)/adc.Temp_Slope;
 }
 // Encoder
 int   Read_Encoder_SPI_Ang(float*Angle)
