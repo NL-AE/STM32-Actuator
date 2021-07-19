@@ -73,12 +73,12 @@ typedef struct{
 	float PVDD, V_bat_R_Bot, V_bat_R_Top;		// Temp_V_Offset/V 	and Resistor divider for PVDD
 	float Temp, Temp_V_Offset, Temp_Slope;		// Board temp 		and thermocouple properties
 
-	int16_t i_a_Raw, i_b_Raw, i_c_Raw, PVDD_Raw, Temp_Raw;	// Raw ADC readings
-	int16_t i_a_Fil, i_b_Fil, i_c_Fil, PVDD_Fil, Temp_Fil;	// Filtered ADC readings
+	int16_t i_a_Raw, i_b_Raw, PVDD_Raw, Temp_Raw;	// Raw ADC readings
+	int16_t i_a_Fil, i_b_Fil, PVDD_Fil, Temp_Fil;	// Filtered ADC readings
 
-	float R_Shunt_Res;								// Shunt resistor resistance /ohms
-	int SO_Gain;									// Gain of sense amp
-	int16_t SO_A_Offset, SO_B_Offset, SO_C_Offset;	// Raw offset of sense amp
+	float R_Shunt_Res;					// Shunt resistor resistance /ohms
+	int SO_Gain;						// Gain of sense amp
+	int16_t SO_A_Offset, SO_B_Offset;	// Raw offset of sense amp
 } ADC_Struct;
 
 typedef struct{
@@ -443,7 +443,7 @@ static void MX_ADC3_Init(void)
   hadc3.Init.ContinuousConvMode = DISABLE;
   hadc3.Init.DiscontinuousConvMode = DISABLE;
   hadc3.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc3.Init.NbrOfConversion = 3;
+  hadc3.Init.NbrOfConversion = 2;
   hadc3.Init.DMAContinuousRequests = ENABLE;
   hadc3.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   if (HAL_ADC_Init(&hadc3) != HAL_OK)
@@ -452,7 +452,7 @@ static void MX_ADC3_Init(void)
   }
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_0;
+  sConfig.Channel = ADC_CHANNEL_3;
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_28CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
@@ -461,16 +461,7 @@ static void MX_ADC3_Init(void)
   }
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_3;
   sConfig.Rank = 2;
-  if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-  */
-  sConfig.Channel = ADC_CHANNEL_12;
-  sConfig.Rank = 3;
   if (HAL_ADC_ConfigChannel(&hadc3, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -840,23 +831,21 @@ void  DRV_Zero_SO(void)
 	HAL_Delay(1);
 
 	// Take 5 readings
-	int16_t temp_A[5], temp_B[5], temp_C[5], temp_PVDD[5], temp_Temp[5];
-	int16_t outp_A[5], outp_B[5], outp_C[5];
+	int16_t temp_A[5], temp_B[5], temp_PVDD[5], temp_Temp[5];
+	int16_t outp_A[5], outp_B[5];
 
 	for(int i=0; i<5; i++)
 	{
-		ADC_Get_Raw(&temp_A[i],&temp_B[i],&temp_C[i],&temp_PVDD[i],&temp_Temp[i]);
+		ADC_Get_Raw(&temp_A[i],&temp_B[i],&temp_PVDD[i],&temp_Temp[i]);
 		HAL_Delay(1);
 	}
 
 	// Sort arrays in ascending order
 	Array_Sort(temp_A,outp_A,5);
 	Array_Sort(temp_B,outp_B,5);
-	Array_Sort(temp_C,outp_C,5);
 
 	adc.SO_A_Offset = (outp_A[1]+outp_A[2]+outp_A[3]) / 3;
 	adc.SO_B_Offset = (outp_B[1]+outp_B[2]+outp_B[3]) / 3;
-	adc.SO_C_Offset = (outp_C[1]+outp_C[2]+outp_C[3]) / 3;
 
 	// Set to normal operation again
 	DRV_SPI_Transmit_Check(0b0101000010101010,0x07FF);	// write 0xA register : Normal operation, 2.5us amp blanking time, 40 gain
@@ -884,28 +873,25 @@ void  Array_Sort (int16_t input[], int16_t output[], int n)
 	}
 }
 // Read ADCs
-void  ADC_Get_Raw    (int16_t*i_a_Raw, int16_t*i_b_Raw, int16_t*i_c_Raw, int16_t*PVDD_Raw, int16_t*Temp_Raw)
+void  ADC_Get_Raw    (int16_t*i_a_Raw, int16_t*i_b_Raw, int16_t*PVDD_Raw, int16_t*Temp_Raw)
 {
 	HAL_ADC_Start(&hadc1);
 	HAL_ADC_PollForConversion(&hadc1, 1);
 
 	*i_a_Raw	= HAL_ADC_GetValue(&hadc1);
 	*i_b_Raw	= HAL_ADC_GetValue(&hadc2);
-	*i_c_Raw	= adc.DMA_Buff[0];
-	*PVDD_Raw	= adc.DMA_Buff[1];
-	*Temp_Raw	= adc.DMA_Buff[2];
+	*PVDD_Raw	= adc.DMA_Buff[0];
+	*Temp_Raw	= adc.DMA_Buff[1];
 }
-void  ADC_Filter_Curr(int16_t i_a_Raw, int16_t i_b_Raw, int16_t i_c_Raw, int16_t*i_a_Fil, int16_t*i_b_Fil, int16_t*i_c_Fil)
+void  ADC_Filter_Curr(int16_t i_a_Raw, int16_t i_b_Raw, int16_t*i_a_Fil, int16_t*i_b_Fil)
 {
 	*i_a_Fil = i_a_Raw;
 	*i_b_Fil = i_b_Raw;
-	*i_c_Fil = i_c_Raw;
 }
-void  ADC_Norm_Curr  (int16_t i_a_Fil, int16_t i_b_Fil, int16_t i_c_Fil, float*i_a, float*i_b, float*i_c)
+void  ADC_Norm_Curr  (int16_t i_a_Fil, int16_t i_b_Fil, float*i_a, float*i_b)
 {
-	*i_a 	= (((float)(i_a_Fil-adc.SO_A_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
-	*i_b 	= (((float)(i_b_Fil-adc.SO_B_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
-	*i_c 	= (((float)(i_c_Fil-adc.SO_C_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
+	*i_a = (((float)(i_a_Fil-adc.SO_A_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
+	*i_b = (((float)(i_b_Fil-adc.SO_B_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
 }
 void  ADC_Filter_Misc(int16_t PVDD_Raw, int16_t Temp_Raw, int16_t*PVDD_Fil, int16_t*Temp_Fil)
 {
@@ -967,14 +953,13 @@ void  FOC_Interrupt(void)
 	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 1);
 
 	/* FOC Sample */
-	ADC_Get_Raw(&adc.i_a_Raw,&adc.i_b_Raw,&adc.i_c_Raw, &adc.PVDD_Raw, &adc.Temp_Raw);	// Read raw ADC
-	foc.theta_IFF_Raw = enc.IIF_Count_Raw;												// Save copy of current IIF count
+	ADC_Get_Raw(&adc.i_a_Raw,&adc.i_b_Raw, &adc.PVDD_Raw, &adc.Temp_Raw);	// Read raw ADC
+	foc.theta_IFF_Raw = enc.IIF_Count_Raw;									// Save copy of current IIF count
 
-	// Filter raw ADC currents
-	ADC_Filter_Curr(adc.i_a_Raw,adc.i_b_Raw,adc.i_c_Raw,&adc.i_a_Fil,&adc.i_b_Fil,&adc.i_c_Fil);
+	ADC_Filter_Curr(adc.i_a_Raw,adc.i_b_Raw,&adc.i_a_Fil,&adc.i_b_Fil);		// Filter raw ADC currents
 
-	// Normalise currents
-	ADC_Norm_Curr(adc.i_a_Fil,adc.i_b_Fil,adc.i_c_Fil,&foc.i_a,&foc.i_b,&foc.i_c);
+	ADC_Norm_Curr(adc.i_a_Fil,adc.i_b_Fil,&foc.i_a,&foc.i_b);				// Normalise currents
+	foc.i_c = -foc.i_a -foc.i_b;											// Calculate phase C current
 
 	/* FOC Maths */
 
