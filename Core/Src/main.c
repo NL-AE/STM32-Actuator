@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdint.h>
 #include <math.h>
 /* USER CODE END Includes */
 
@@ -61,13 +62,26 @@ TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
 
-// ADC
-uint32_t ADC_3_Reading[3];						// Array for ADC 3 DMA requests
-float	 Temp_Board_C, V_Bat, Phase_Cur_ABC[3];	// Board temp, V battery, phase currents (in order A, B, C)
-// Encoder
-float ENC_Ang = 0;			// Encoder angle
-float ENC_Vel = 0;			// Encoder velocity
-int16_t ENC_IIF_Count = 0;	// Encoder IIF count
+typedef struct{
+	uint32_t DMA_Buff[3];	// Array for ADC 3 DMA requests
+	float Temp_Board_C;		// Temp of board	/C
+	float PVDD;				// Power voltage	/V
+	float i_a, i_b, i_c;	// Phase currents	/amps
+} ADC_Struct;
+
+typedef struct{
+	float theta;		// Encoder angle		/rad
+	float velocity;		// Encoder velocity		/rads-1
+	int16_t IIF_Count;	// Encoder IIF count
+} ENC_Struct;
+
+typedef struct{
+	float theta_mech, theta_elec;	// Mechanical and electrical theta	/rad
+} FOC_Struct;
+
+ADC_Struct adc;
+ENC_Struct enc;
+FOC_Struct foc;
 
 /* USER CODE END PV */
 
@@ -138,14 +152,15 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
 
-  printf(" Actuator Firmware Version: 1.0\n");
+  HAL_Delay(10);
+  printf("Actuator Firmware Version: 1.0\n");
   HAL_Delay(10);
 
   /* Start ADCs */
   printf("Start ADC... ");
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
-  HAL_ADC_Start_DMA(&hadc3, ADC_3_Reading, 3);
+  HAL_ADC_Start_DMA(&hadc3, adc.DMA_Buff, 3);
   printf("Good\n");
   HAL_Delay(10);
 
@@ -171,12 +186,12 @@ int main(void)
 
   /* Check Encoder talks */
   printf("Start ENC... ");
-  int Enc_Err = Read_Encoder_SPI_Ang(&ENC_Ang);		// read one value from encoders
+  int Enc_Err = Read_Encoder_SPI_Ang(&enc.theta);		// read one value from encoders
   if(Enc_Err){										// if errors occurs,
 	  printf("Error: %i\n",Enc_Err);					// printf
 	  //while(1);
   }
-  ENC_IIF_Count = (int)(ENC_Ang /360.0 * 4095.0);	// Zero encoder
+  enc.IIF_Count = (int)(enc.theta /360.0 * 4095.0);	// Zero encoder
   printf("Good\n");
   HAL_Delay(10);
 
@@ -796,9 +811,9 @@ void  Read_ADCs(float*Cur_Phase_A, float*Cur_Phase_B, float*Cur_Phase_C, float*V
 
 	*Cur_Phase_A 	= ((float)HAL_ADC_GetValue(&hadc1))*3.3/4095.0*V_to_Amps_Const;
 	*Cur_Phase_B 	= (float)HAL_ADC_GetValue(&hadc2)*3.3/4095.0*V_to_Amps_Const;
-	*Cur_Phase_C 	= (float)ADC_3_Reading[0]*3.3/4095.0*V_to_Amps_Const;
-	*V_Bat			= (float)ADC_3_Reading[1]*3.3/4095.0 / V_bat_R_Bot * (V_bat_R_Bot+V_bat_R_Top);
-    *Temp_Board_C	= ((((float)ADC_3_Reading[2])*3.3/4095.0)-Temp_V_Offset)/Temp_Slope;
+	*Cur_Phase_C 	= (float)adc.DMA_Buff[0]*3.3/4095.0*V_to_Amps_Const;
+	*V_Bat			= (float)adc.DMA_Buff[1]*3.3/4095.0 / V_bat_R_Bot * (V_bat_R_Bot+V_bat_R_Top);
+    *Temp_Board_C	= ((((float)adc.DMA_Buff[2])*3.3/4095.0)-Temp_V_Offset)/Temp_Slope;
 }
 // Encoder
 int   Read_Encoder_SPI_Ang(float*Angle)
@@ -836,15 +851,13 @@ void  FOC_Interrupt(void)
 	/* LED on */
 	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 1);
 
-	ENC_Ang = (float)(ENC_IIF_Count/4095.0*360.0);
-
 	/* Read ADCs */
-	Read_ADCs(&Phase_Cur_ABC[0],&Phase_Cur_ABC[1],&Phase_Cur_ABC[2], &V_Bat, &Temp_Board_C);
+	Read_ADCs(&adc.i_a,&adc.i_b,&adc.i_c, &adc.PVDD, &adc.Temp_Board_C);
 
 	/* FOC Maths */
+	enc.theta = (float)(enc.IIF_Count/4095.0*360.0);
 
 	/* Set PWM Compare values */
-
 	Set_PWM3(PWM_Max_Count*0.01,PWM_Max_Count*0.02,PWM_Max_Count*0.03);
 
 	/* LED off */
@@ -853,15 +866,15 @@ void  FOC_Interrupt(void)
 void  IF_B_Int(void)
 {
 	if(HAL_GPIO_ReadPin(IF_A_GPIO_Port, IF_A_Pin))
-		if(ENC_IIF_Count>=4095)
-			ENC_IIF_Count = 0;
+		if(enc.IIF_Count>=4095)
+			enc.IIF_Count = 0;
 		else
-			ENC_IIF_Count++;
+			enc.IIF_Count++;
 	else
-		if(ENC_IIF_Count<=0)
-			ENC_IIF_Count = 4095;
+		if(enc.IIF_Count<=0)
+			enc.IIF_Count = 4095;
 		else
-			ENC_IIF_Count--;
+			enc.IIF_Count--;
 }
 
 /* USER CODE END 4 */
