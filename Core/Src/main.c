@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <math.h>
+#include "sin_lookup.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -96,11 +97,19 @@ typedef struct
 // FOC
 typedef struct
 {
-	int Pole_Pairs;			// number of pole pairs
-	float dt;				// delta T of FOC response	/seconds
-	float theta, dtheta;	// Theta and dtheta			/rad		/rads-1
-	float i_a, i_b, i_c;	// Phase currents			/amps
-	uint16_t PWM_Reg_Max;	// PWM register max
+	int Pole_Pairs;				// number of pole pairs
+	float dt;					// delta T of FOC response		/seconds
+
+	float theta, dtheta;		// mechanical theta and dtheta	/deg		/degs-1
+	float e_theta, e_dtheta;	// electrical theta and dtheta	/deg		/degs-1
+
+	float i_a, i_b, i_c;		// Phase currents				/amps
+	float i_alph, i_beta;		// Alpha/Beta currents			/amps
+	float i_d, i_q;				// Direct/Quadrature currents	/amps
+
+	uint16_t PWM_Reg_Max;		// PWM register max
+
+	float PWM_A, PWM_C, PWM_B;	// Duty cycle
 } FOC_Struct;
 
 // Filter
@@ -1048,8 +1057,8 @@ void  ENC_Filter (int16_t IIF_Raw, uint32_t dIIF_Raw, int16_t*IIF_Fil, uint32_t*
 }
 void  ENC_Norm   (int16_t IIF_Fil, uint32_t Pulse_Fil, float*theta, float*dtheta)
 {
-	*theta = (float)IIF_Fil/4095.0f*PI2;
-	*dtheta = 84000000.0f * PI / 180.0f * 360.0f / 4096.0f / (float)Pulse_Fil;
+	*theta = (float)IIF_Fil/4095.0f*360.0f;
+	*dtheta = 84000000.0f * 360.0f / 4096.0f / (float)Pulse_Fil;
 }
 // FOC stuff
 void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3)
@@ -1058,9 +1067,13 @@ void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3)
 	__HAL_TIM_SET_COMPARE(&htim1,Phase_B_Ch,ARR_2);
 	__HAL_TIM_SET_COMPARE(&htim1,Phase_C_Ch,ARR_3);
 }
-float _SIN(float theta)
+float _sin(float theta)
 {
-	return 0;
+	return sin_lookup[(int)floor(theta)];
+}
+float _cos(float theta)
+{
+	return sin_lookup[(int)fmod((floor(theta)+90),360)];
 }
 // Timer Interrupts
 void  FOC_Interrupt(void)
@@ -1076,16 +1089,74 @@ void  FOC_Interrupt(void)
 	/* Filter and normalise readings */
 	ADC_Filter_Curr(adc.i_a_Raw,adc.i_b_Raw,&adc.i_a_Fil,&adc.i_b_Fil);		// Filter raw ADC currents
 	ADC_Norm_Curr  (adc.i_a_Fil,adc.i_b_Fil,&foc.i_a,&foc.i_b);				// Normalise currents
-	foc.i_c = -foc.i_a -foc.i_b;											// Calculate phase C current
 
 	ENC_Filter(enc.IIF_Raw,enc.Pulse_Raw,&enc.IIF_Fil,&enc.Pulse_Fil);		// Filter encoder position and pulse len
 	ENC_Norm(enc.IIF_Fil, enc.Pulse_Fil, &foc.theta, &foc.dtheta);			// Normalise to theta and dtheta
 
 	/* FOC maths */
+	// Get angles correct
+	foc.e_theta  = fmodf(foc.theta*foc.Pole_Pairs,360.0);	// get electrical angle and constrain in 360 deg
+	foc.e_dtheta = foc.dtheta * foc.Pole_Pairs;
 
+	// Calculate alpha/beta
+	foc.i_alph = foc.i_a;
+	foc.i_beta = SQRT1_3 * (2*foc.i_b - foc.i_a);
+
+	// Calculate direct/quadrature
+	float sin_Ang = _sin(foc.e_theta);
+	float cos_Ang = _cos(foc.e_theta);
+	foc.i_d = cos_Ang*foc.i_alph + sin_Ang*foc.i_beta;
+	foc.i_q = cos_Ang*foc.i_beta - sin_Ang*foc.i_alph;
+
+	/* Regulate currents */
+	float Curr_Duty = 0.1;			// Current duty cycle
 
 	/* Set PWM Compare values */
-	Set_PWM3(foc.PWM_Reg_Max*0.01,foc.PWM_Reg_Max*0.02,foc.PWM_Reg_Max*0.03);
+	foc.e_theta += 1.0f;			// Lead by 1deg
+
+	float alpha = fmodf(foc.e_theta,60.0f);
+
+	float DC_1 = Curr_Duty*_sin(60.0f - alpha);
+	float DC_2 = Curr_Duty*_sin(alpha);
+	float DC_0 = 1.0f - DC_1 - DC_2;
+
+	int sector = (int)floor(foc.e_theta/60.0f);
+
+	switch (sector) {
+		case 0:
+			foc.PWM_A = 0.5*DC_0;
+			foc.PWM_B = 0.5*DC_0 + DC_1;
+			foc.PWM_C = 0.5*DC_0 + DC_1 + DC_2;
+			break;
+		case 1:
+			foc.PWM_A = 0.5*DC_0 + DC_2;
+			foc.PWM_B = 0.5*DC_0;
+			foc.PWM_C = 0.5*DC_0 + DC_1 + DC_2;
+			break;
+		case 2:
+			foc.PWM_A = 0.5*DC_0 + DC_1 + DC_2;
+			foc.PWM_B = 0.5*DC_0;
+			foc.PWM_C = 0.5*DC_0 + DC_1;
+			break;
+		case 3:
+			foc.PWM_A = 0.5*DC_0 + DC_1 + DC_2;
+			foc.PWM_B = 0.5*DC_0 + DC_2;
+			foc.PWM_C = 0.5*DC_0;
+			break;
+		case 4:
+			foc.PWM_A = 0.5*DC_0 + DC_1;
+			foc.PWM_B = 0.5*DC_0 + DC_1 + DC_2;
+			foc.PWM_C = 0.5*DC_0;
+			break;
+		case 5:
+			foc.PWM_A = 0.5*DC_0;
+			foc.PWM_B = 0.5*DC_0 + DC_1 + DC_2;
+			foc.PWM_C = 0.5*DC_0 + DC_2;
+			break;
+	}
+
+
+	Set_PWM3(foc.PWM_Reg_Max*foc.PWM_A,foc.PWM_Reg_Max*foc.PWM_B,foc.PWM_Reg_Max*foc.PWM_C);
 
 	/* LED off */
 	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 0);

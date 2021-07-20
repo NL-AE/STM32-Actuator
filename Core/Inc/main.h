@@ -83,7 +83,8 @@ void  ENC_Filter (int16_t IIF_Raw, uint32_t dIIF_Raw, int16_t*IIF_Fil, uint32_t*
 void  ENC_Norm   (int16_t IIF_Fil, uint32_t dIIF_Fil, float*theta, float*dtheta);			// Normalise encoder values
 // FOC stuff
 void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3);		// set pwm values for channels A,B,C
-float _SIN(float theta);											// sin(theta)
+float _sin(float theta);											// sin(theta)
+float _cos(float theta);											// cos(theta)
 // Interrupts
 void  FOC_Interrupt(void);		// FOC interrupt
 
