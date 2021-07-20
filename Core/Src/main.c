@@ -62,16 +62,23 @@ TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN PV */
 
-typedef struct{
-	float SPI_theta;		// IIF from SPI
-	int16_t IIF_Count_Raw;	// Encoder IIF counts
+// Encoder
+typedef struct
+{
+	float SPI_theta;			// IIF from SPI
+	int16_t IIF_Counter;		// The counter variable that is interrupt driven so dont use it in calculations
+	int16_t IIF_Raw_Prev;		// Previous IIF counter position
+	int16_t IIF_Raw,dIIF_Raw;	// Encoder IIF counts
+	int16_t IIF_Fil,dIIF_Fil;	// delta IIF count
 } ENC_Struct;
 
-typedef struct{
+// ADC
+typedef struct
+{
 	float VDDA;
 	uint32_t DMA_Buff[3];						// Array for ADC 3 DMA requests
-	float PVDD, V_bat_R_Bot, V_bat_R_Top;		// Temp_V_Offset/V 	and Resistor divider for PVDD
-	float Temp, Temp_V_Offset, Temp_Slope;		// Board temp 		and thermocouple properties
+	float PVDD, V_bat_R_Bot, V_bat_R_Top;		// Temp_V_Offset/V 	and Resistor divider for PVDD	V1: V_o = Vin * R2 / (R1+R2)
+	float Temp, Temp_V_Offset, Temp_Slope;		// Board temp 		and thermocouple properties		LM60: V_o = (6.25mV * T/C) + 424mV
 
 	int16_t i_a_Raw, i_b_Raw, PVDD_Raw, Temp_Raw;	// Raw ADC readings
 	int16_t i_a_Fil, i_b_Fil, PVDD_Fil, Temp_Fil;	// Filtered ADC readings
@@ -81,21 +88,38 @@ typedef struct{
 	int16_t SO_A_Offset, SO_B_Offset;	// Raw offset of sense amp
 } ADC_Struct;
 
-typedef struct{
-	int Pole_Pairs;		// number of pole pairs
-
-	float dt;			// delta T of FOC response	/seconds
-
-	int16_t theta_IFF_Raw, theta_IIF_Fil;	// Copy of current IIF raw and filtered		/rad
-	float dtheta_Raw, dtheta_Fil;			// Raw and filtered velocity				/rads-1
-
-	float i_a, i_b, i_c;			// Phase currents		/amps
-	uint16_t PWM_Reg_Max;			// PWM register max
+// FOC
+typedef struct
+{
+	int Pole_Pairs;			// number of pole pairs
+	float dt;				// delta T of FOC response	/seconds
+	float theta, dtheta;	// Theta and dtheta			/rad		/rads-1
+	float i_a, i_b, i_c;	// Phase currents			/amps
+	uint16_t PWM_Reg_Max;	// PWM register max
 } FOC_Struct;
+
+// Filter
+typedef struct
+{
+	// Butterworth from: https://www.meme.net.au/butterworth.html
+	// At 6.667KHz smapling
+	// y(i) = k1*x(i) + k1*x(i-1) + k2*y(i-1)
+
+	// Filters i_a, i_b, PVDD, Temp, IIF count, IIF vel
+
+	float i_k[2];		// Filter coefficients for current filters
+	float IIF_k[2];		// Filter coefficients for IIF filters
+	float Misc_k[2];	// Filter coefficients for misc filter
+
+	int16_t i_a_Pre, i_a_Pre_Fil, i_b_Pre, i_b_Pre_Fil;			// Previous values for current
+	int16_t PVDD_Pre, PVDD_Pre_Fil, Temp_Pre, Temp_Pre_Fil;		// Previous values for PVDD and temp
+	int16_t IIF_Pre, IIf_Pre_Fil, dIIF_Pre, dIIF_Pre_Fil;		// Previous values for IIF and dIIF
+} FIL_Struct;
 
 ENC_Struct enc;
 ADC_Struct adc;
 FOC_Struct foc;
+FIL_Struct fil;
 
 /* USER CODE END PV */
 
@@ -205,35 +229,28 @@ int main(void)
 	  printf("Error: %i\n",Enc_Err);
 	  while(1);
   }
-  enc.IIF_Count_Raw = (int)(enc.SPI_theta /360.0 * 4095.0);	// Zero encoder
+  enc.IIF_Counter = (int)(enc.SPI_theta /360.0f * 4095.0f);	// Zero encoder
   printf("Good\n");
   HAL_Delay(10);
 
-  /* Setup ADC Constants */
-  // Actually 3.25V not 3.3V
-  adc.VDDA = 3.25;
-  // V1: V_o = Vin * R2 / (R1+R2)
-  adc.V_bat_R_Top = 75.0;
-  adc.V_bat_R_Bot = 5.1;
+  /* Setup ADC structure */
+  adc.VDDA = 3.25f;				// Actually 3.25V not 3.3V
+  adc.V_bat_R_Top = 75.0f;
+  adc.V_bat_R_Bot = 5.1f;
+  adc.Temp_V_Offset = 0.424f;
+  adc.Temp_Slope = 0.00625f;
+  adc.R_Shunt_Res = 0.001f;
+  adc.SO_Gain = 40.0f;
 
-  // LM60: V_o = (6.25mV * T/C) + 424mV
-  adc.Temp_V_Offset = 0.424;
-  adc.Temp_Slope = 0.00625;
-
-  // Shunt resistor resistance
-  adc.R_Shunt_Res = 0.001;
-  // Set sense amp gain
-  adc.SO_Gain = 40;
-
-  /* Setup FOC Constants*/
-  // Set pole pairs
-  foc.Pole_Pairs = 21;
-
-  // Set FOC response dt
-  foc.dt = 1/((168*1000000) / (htim1.Init.Period+1) / (htim1.Init.RepetitionCounter+1));
-
-  // Look for PWM register max
+  /* Setup FOC structure*/
+  foc.Pole_Pairs = 21.0f;
+  foc.dt = (float)(1.0f/(168.0f*1000000.0f/(htim1.Init.Period+1)/(htim1.Init.RepetitionCounter+1)));
   foc.PWM_Reg_Max = htim1.Init.Period;
+
+  /* Setup Filter structure */
+  fil.i_k[0]    = 0.579f;	fil.i_k[1]    = -0.159f;
+  fil.IIF_k[0]  = 0.579f;	fil.IIF_k[1]  = -0.159f;
+  fil.Misc_k[0] = 0.421f;	fil.Misc_k[1] =  0.158f;
 
   printf("FOC Start\n");
 
@@ -251,10 +268,8 @@ int main(void)
 	  if(HAL_GPIO_ReadPin(DRV_FAULT_GPIO_Port, DRV_FAULT_Pin)==0)
 		  DRV_Error();
 
-	  // Filter raw ADC PVDD and temp
-	  ADC_Filter_Misc(adc.PVDD_Raw,adc.Temp_Raw,&adc.PVDD_Fil,&adc.Temp_Fil);
-	  // Normalise PVDD and temp
-	  ADC_Norm_Misc(adc.PVDD_Fil,adc.Temp_Fil,&adc.PVDD,&adc.Temp);
+	  ADC_Filter_Misc(adc.PVDD_Raw,adc.Temp_Raw,&adc.PVDD_Fil,&adc.Temp_Fil);	// Filter raw ADC PVDD and temp
+	  ADC_Norm_Misc(adc.PVDD_Fil,adc.Temp_Fil,&adc.PVDD,&adc.Temp);				 // Normalise PVDD and temp
 
 //	  HAL_GPIO_WritePin(G_LED_GPIO_Port, G_LED_Pin, 0);
 
@@ -885,23 +900,39 @@ void  ADC_Get_Raw    (int16_t*i_a_Raw, int16_t*i_b_Raw, int16_t*PVDD_Raw, int16_
 }
 void  ADC_Filter_Curr(int16_t i_a_Raw, int16_t i_b_Raw, int16_t*i_a_Fil, int16_t*i_b_Fil)
 {
-	*i_a_Fil = i_a_Raw;
-	*i_b_Fil = i_b_Raw;
+	// Filter
+	*i_a_Fil = fil.i_k[0]*i_a_Raw + fil.i_k[0]*fil.i_a_Pre + fil.i_k[1]*fil.i_a_Pre_Fil;
+	*i_b_Fil = fil.i_k[0]*i_b_Raw + fil.i_k[0]*fil.i_b_Pre + fil.i_k[1]*fil.i_b_Pre_Fil;
+
+	// Now store current values as previous values
+	fil.i_a_Pre = i_a_Raw;
+	fil.i_b_Pre = i_b_Raw;
+
+	fil.i_a_Pre_Fil = *i_a_Fil;
+	fil.i_b_Pre_Fil = *i_b_Fil;
 }
 void  ADC_Norm_Curr  (int16_t i_a_Fil, int16_t i_b_Fil, float*i_a, float*i_b)
 {
-	*i_a = (((float)(i_a_Fil-adc.SO_A_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
-	*i_b = (((float)(i_b_Fil-adc.SO_B_Offset))*adc.VDDA/4095.0)/adc.SO_Gain/adc.R_Shunt_Res;
+	*i_a = (((float)(i_a_Fil-adc.SO_A_Offset))*adc.VDDA/4095.0f)/adc.SO_Gain/adc.R_Shunt_Res;
+	*i_b = (((float)(i_b_Fil-adc.SO_B_Offset))*adc.VDDA/4095.0f)/adc.SO_Gain/adc.R_Shunt_Res;
 }
 void  ADC_Filter_Misc(int16_t PVDD_Raw, int16_t Temp_Raw, int16_t*PVDD_Fil, int16_t*Temp_Fil)
 {
-	*PVDD_Fil = PVDD_Raw;
-	*Temp_Fil = Temp_Raw;
+	// Filter
+	*PVDD_Fil = fil.Misc_k[0]*PVDD_Raw + fil.Misc_k[0]*fil.PVDD_Pre + fil.Misc_k[1]*fil.PVDD_Pre_Fil;
+	*Temp_Fil = fil.Misc_k[0]*Temp_Raw + fil.Misc_k[0]*fil.Temp_Pre + fil.Misc_k[1]*fil.Temp_Pre_Fil;
+
+	// Now store current values as previous values
+	fil.PVDD_Pre = PVDD_Raw;
+	fil.Temp_Pre = Temp_Raw;
+
+	fil.PVDD_Pre_Fil = *PVDD_Fil;
+	fil.Temp_Pre_Fil = *Temp_Fil;
 }
 void  ADC_Norm_Misc  (int16_t PVDD_Fil, int16_t Temp_Fil, float*PVDD, float*Temp)
 {
-	*PVDD = (float)PVDD_Fil*adc.VDDA/4095.0 / adc.V_bat_R_Bot * (adc.V_bat_R_Bot+adc.V_bat_R_Top);
-	*Temp = (((float)Temp_Fil*adc.VDDA/4095.0)-adc.Temp_V_Offset)/adc.Temp_Slope;
+	*PVDD = (float)PVDD_Fil*adc.VDDA/4095.0f / adc.V_bat_R_Bot * (adc.V_bat_R_Bot+adc.V_bat_R_Top);
+	*Temp = (((float)Temp_Fil*adc.VDDA/4095.0f)-adc.Temp_V_Offset)/adc.Temp_Slope;
 }
 // Encoder
 int   Read_Encoder_SPI_Ang(float*Angle)
@@ -925,17 +956,43 @@ int   Read_Encoder_SPI_Ang(float*Angle)
 void  IF_B_Int(void)
 {
 	if(HAL_GPIO_ReadPin(IF_A_GPIO_Port, IF_A_Pin))
-		if(enc.IIF_Count_Raw>=4095)
-			enc.IIF_Count_Raw = 0;
+		if(enc.IIF_Counter>=4095)
+			enc.IIF_Counter = 0;
 		else
-			enc.IIF_Count_Raw++;
+			enc.IIF_Counter++;
 	else
-		if(enc.IIF_Count_Raw<=0)
-			enc.IIF_Count_Raw = 4095;
+		if(enc.IIF_Counter<=0)
+			enc.IIF_Counter = 4095;
 		else
-			enc.IIF_Count_Raw--;
+			enc.IIF_Counter--;
 }
-// FOC
+void  ENC_Get_Raw(int16_t*IIF_out, int16_t*dIIF_out)
+{
+	int16_t temp = enc.IIF_Counter;		// save copy of current IIF counter
+
+	*IIF_out = temp;						// output IIF counter
+	*dIIF_out = temp - enc.IIF_Raw_Prev;	// calculate delta IIF counter
+	enc.IIF_Raw_Prev = temp;				// now save
+}
+void  ENC_Filter (int16_t IIF_Raw, int16_t dIIF_Raw, int16_t*IIF_Fil, int16_t*dIIF_Fil)
+{
+	// Filter
+	*IIF_Fil  = fil.IIF_k[0]* IIF_Raw + fil.IIF_k[0]*fil.IIF_Pre  + fil.IIF_k[1]*fil.IIf_Pre_Fil ;
+	*dIIF_Fil = fil.IIF_k[0]*dIIF_Raw + fil.IIF_k[0]*fil.dIIF_Pre + fil.IIF_k[1]*fil.dIIF_Pre_Fil;
+
+	// Now store current values as previous values
+	fil.IIF_Pre  = IIF_Raw;
+	fil.dIIF_Pre = dIIF_Raw;
+
+	fil.IIf_Pre_Fil  = *IIF_Fil;
+	fil.dIIF_Pre_Fil = *dIIF_Fil;
+}
+void  ENC_Norm   (int16_t IIF_Fil, int16_t dIIF_Fil, float*theta, float*dtheta)
+{
+	*theta = (float)IIF_Fil/4095.0f*PI2;
+	*dtheta = (float)dIIF_Fil/4095.0f*PI2/foc.dt;
+}
+// FOC stuff
 void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3)
 {
 	__HAL_TIM_SET_COMPARE(&htim1,Phase_A_Ch,ARR_1);	// Set PWM channels
@@ -952,16 +1009,22 @@ void  FOC_Interrupt(void)
 	/* LED on */
 	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 1);
 
-	/* FOC Sample */
+	/* FOC sample */
 	ADC_Get_Raw(&adc.i_a_Raw,&adc.i_b_Raw, &adc.PVDD_Raw, &adc.Temp_Raw);	// Read raw ADC
-	foc.theta_IFF_Raw = enc.IIF_Count_Raw;									// Save copy of current IIF count
+	ENC_Get_Raw(&enc.IIF_Raw, &enc.dIIF_Raw);								// Get raw encoder
+//	enc.IIF_Raw = enc.IIF_Counter;
+//	enc.dIIF_Raw = enc.IIF_Raw - enc.IIF_Raw_Prev;
+//	enc.IIF_Raw_Prev = enc.IIF_Raw;
 
+	/* Filter and normalise readings */
 	ADC_Filter_Curr(adc.i_a_Raw,adc.i_b_Raw,&adc.i_a_Fil,&adc.i_b_Fil);		// Filter raw ADC currents
-
-	ADC_Norm_Curr(adc.i_a_Fil,adc.i_b_Fil,&foc.i_a,&foc.i_b);				// Normalise currents
+	ADC_Norm_Curr  (adc.i_a_Fil,adc.i_b_Fil,&foc.i_a,&foc.i_b);				// Normalise currents
 	foc.i_c = -foc.i_a -foc.i_b;											// Calculate phase C current
 
-	/* FOC Maths */
+	ENC_Filter(enc.IIF_Raw,enc.dIIF_Raw,&enc.IIF_Fil,&enc.dIIF_Fil);		// Filter encoder position and vel
+	ENC_Norm(enc.IIF_Fil, enc.dIIF_Fil, &foc.theta, &foc.dtheta);			// Normalise to theta and dtheta
+
+	/* FOC maths */
 
 
 	/* Set PWM Compare values */

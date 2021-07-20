@@ -44,10 +44,11 @@ extern "C" {
 /* USER CODE BEGIN EC */
 
 // FOC related
-#define SQRT3 		1.73205080757f
-#define SQRT3_2		0.86602540378f
-#define SQRT1_3		0.57735026919f
-#define PI_F 		3.14159274101f
+#define PI 		3.14159274101f
+#define PI2		6.28318530718f
+#define SQRT3 	1.73205080757f
+#define SQRT3_2	0.86602540378f
+#define SQRT1_3	0.57735026919f
 
 /* USER CODE END EC */
 
@@ -67,7 +68,7 @@ void Error_Handler(void);
 int   DRV_SPI_Transmit_Check(uint16_t TX_Data, uint16_t RSVD_Mask);		// custom SPI transmit and check if written with RSVD mask
 int   DRV_Start(void);													// sends over SPI commands to setup
 void  DRV_Error(void);													// read NFAULT registers occurs
-void  DRV_Zero_SO(void);													// set sense amps to DC calibration, calculates ADC offset and re-enables them
+void  DRV_Zero_SO(void);												// set sense amps to DC calibration, calculates ADC offset and re-enables them
 void  Array_Sort(int16_t input[], int16_t output[], int n);				// sorts input array length n
 // ADC
 void  ADC_Get_Raw    (int16_t*i_a_Raw, int16_t*i_b_Raw, int16_t*PVDD_Raw, int16_t*Temp_Raw);	// Reads all ADCs
@@ -76,8 +77,11 @@ void  ADC_Norm_Curr  (int16_t i_a_Fil, int16_t i_b_Fil, float*i_a, float*i_b);		
 void  ADC_Filter_Misc(int16_t PVDD_Raw, int16_t Temp_Raw, int16_t*PVDD_Fil, int16_t*Temp_Fil);	// Put ADC readings into filter
 void  ADC_Norm_Misc  (int16_t PVDD_Fil, int16_t Temp_Fil, float*PVDD, float*Temp);				// Normalise ADC values to properties
 // Encoder
-int   Read_Encoder_SPI_Ang(float*Angle);		// ask for encoder angle over SPI
-void  IF_B_Int(void);						// Phase B interrupt for encoder
+int   Read_Encoder_SPI_Ang(float*Angle);				// ask for encoder angle over SPI
+void  IF_B_Int(void);									// Phase B interrupt for encoder
+void  ENC_Get_Raw(int16_t*IIF_out, int16_t*dIIF_out);										// Get raw values
+void  ENC_Filter (int16_t IIF_Raw, int16_t dIIF_Raw, int16_t*IIF_Fil, int16_t*dIIF_Fil);	// Filter
+void  ENC_Norm   (int16_t IIF_Fil, int16_t dIIF_Fil, float*theta, float*dtheta);			// Normalise encoder values
 // FOC stuff
 void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3);		// set pwm values for channels A,B,C
 float _SIN(float theta);											// sin(theta)
