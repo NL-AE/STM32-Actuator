@@ -59,6 +59,7 @@ SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
 
@@ -67,9 +68,13 @@ typedef struct
 {
 	float SPI_theta;			// IIF from SPI
 	int16_t IIF_Counter;		// The counter variable that is interrupt driven so dont use it in calculations
-	int16_t IIF_Raw_Prev;		// Previous IIF counter position
-	int16_t IIF_Raw,dIIF_Raw;	// Encoder IIF counts
-	int16_t IIF_Fil,dIIF_Fil;	// delta IIF count
+
+	int16_t IIF_Raw, IIF_Fil;		// Encoder IIF counts
+
+	uint32_t TimerVal1, TimerVal2;	// Timer values one for first rising edge and another for second rising edge
+	uint32_t Pulse_Raw,Pulse_Fil;	// Length of phase B pulse
+	uint8_t Pulse_Measured;			// var to tell if to measure the pulse length
+
 } ENC_Struct;
 
 // ADC
@@ -121,6 +126,8 @@ ADC_Struct adc;
 FOC_Struct foc;
 FIL_Struct fil;
 
+uint32_t timer_val;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -134,6 +141,7 @@ static void MX_ADC2_Init(void);
 static void MX_ADC3_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -188,6 +196,7 @@ int main(void)
   MX_ADC3_Init();
   MX_SPI1_Init();
   MX_SPI2_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_Delay(10);
@@ -201,9 +210,10 @@ int main(void)
   printf("Good\n");
   HAL_Delay(10);
 
-  /* Startup PWM */
-  printf("Start PWM... ");
+  /* Startup Timers */
+  printf("Start Timers... ");
   HAL_TIM_Base_Start_IT(&htim1);
+  HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_PWM_Start(&htim1, Phase_A_Ch);
   HAL_TIM_PWM_Start(&htim1, Phase_B_Ch);
   HAL_TIM_PWM_Start(&htim1, Phase_C_Ch);
@@ -233,6 +243,9 @@ int main(void)
   printf("Good\n");
   HAL_Delay(10);
 
+  /* Setup Encoder structure */
+  enc.Pulse_Measured = 0;
+
   /* Setup ADC structure */
   adc.VDDA = 3.25f;				// Actually 3.25V not 3.3V
   adc.V_bat_R_Top = 75.0f;
@@ -253,6 +266,7 @@ int main(void)
   fil.Misc_k[0] = 0.421f;	fil.Misc_k[1] =  0.158f;
 
   printf("FOC Start\n");
+  HAL_Delay(500);
 
   /* USER CODE END 2 */
 
@@ -684,6 +698,51 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 4294967295;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -955,6 +1014,14 @@ int   Read_Encoder_SPI_Ang(float*Angle)
 }
 void  IF_B_Int(void)
 {
+	if(enc.Pulse_Measured==0){
+		enc.TimerVal1 = __HAL_TIM_GET_COUNTER(&htim2);	// Store in value 1
+		enc.Pulse_Measured = 1;
+	}else{
+		enc.TimerVal2 = __HAL_TIM_GET_COUNTER(&htim2);	// Store in value 2
+		enc.Pulse_Measured = 0;
+	}
+
 	if(HAL_GPIO_ReadPin(IF_A_GPIO_Port, IF_A_Pin))
 		if(enc.IIF_Counter>=4095)
 			enc.IIF_Counter = 0;
@@ -966,15 +1033,7 @@ void  IF_B_Int(void)
 		else
 			enc.IIF_Counter--;
 }
-void  ENC_Get_Raw(int16_t*IIF_out, int16_t*dIIF_out)
-{
-	int16_t temp = enc.IIF_Counter;		// save copy of current IIF counter
-
-	*IIF_out = temp;						// output IIF counter
-	*dIIF_out = temp - enc.IIF_Raw_Prev;	// calculate delta IIF counter
-	enc.IIF_Raw_Prev = temp;				// now save
-}
-void  ENC_Filter (int16_t IIF_Raw, int16_t dIIF_Raw, int16_t*IIF_Fil, int16_t*dIIF_Fil)
+void  ENC_Filter (int16_t IIF_Raw, uint32_t dIIF_Raw, int16_t*IIF_Fil, uint32_t*dIIF_Fil)
 {
 	// Filter
 	*IIF_Fil  = fil.IIF_k[0]* IIF_Raw + fil.IIF_k[0]*fil.IIF_Pre  + fil.IIF_k[1]*fil.IIf_Pre_Fil ;
@@ -987,10 +1046,10 @@ void  ENC_Filter (int16_t IIF_Raw, int16_t dIIF_Raw, int16_t*IIF_Fil, int16_t*dI
 	fil.IIf_Pre_Fil  = *IIF_Fil;
 	fil.dIIF_Pre_Fil = *dIIF_Fil;
 }
-void  ENC_Norm   (int16_t IIF_Fil, int16_t dIIF_Fil, float*theta, float*dtheta)
+void  ENC_Norm   (int16_t IIF_Fil, uint32_t Pulse_Fil, float*theta, float*dtheta)
 {
 	*theta = (float)IIF_Fil/4095.0f*PI2;
-	*dtheta = (float)dIIF_Fil/4095.0f*PI2/foc.dt;
+	*dtheta = 84000000.0f * PI / 180.0f * 360.0f / 4096.0f / (float)Pulse_Fil;
 }
 // FOC stuff
 void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3)
@@ -1011,18 +1070,16 @@ void  FOC_Interrupt(void)
 
 	/* FOC sample */
 	ADC_Get_Raw(&adc.i_a_Raw,&adc.i_b_Raw, &adc.PVDD_Raw, &adc.Temp_Raw);	// Read raw ADC
-	ENC_Get_Raw(&enc.IIF_Raw, &enc.dIIF_Raw);								// Get raw encoder
-//	enc.IIF_Raw = enc.IIF_Counter;
-//	enc.dIIF_Raw = enc.IIF_Raw - enc.IIF_Raw_Prev;
-//	enc.IIF_Raw_Prev = enc.IIF_Raw;
+	enc.IIF_Raw = enc.IIF_Counter;											// Get encoder angle
+	enc.Pulse_Raw = enc.TimerVal1-enc.TimerVal2;							// Get the clock cycles duration for one pulse
 
 	/* Filter and normalise readings */
 	ADC_Filter_Curr(adc.i_a_Raw,adc.i_b_Raw,&adc.i_a_Fil,&adc.i_b_Fil);		// Filter raw ADC currents
 	ADC_Norm_Curr  (adc.i_a_Fil,adc.i_b_Fil,&foc.i_a,&foc.i_b);				// Normalise currents
 	foc.i_c = -foc.i_a -foc.i_b;											// Calculate phase C current
 
-	ENC_Filter(enc.IIF_Raw,enc.dIIF_Raw,&enc.IIF_Fil,&enc.dIIF_Fil);		// Filter encoder position and vel
-	ENC_Norm(enc.IIF_Fil, enc.dIIF_Fil, &foc.theta, &foc.dtheta);			// Normalise to theta and dtheta
+	ENC_Filter(enc.IIF_Raw,enc.Pulse_Raw,&enc.IIF_Fil,&enc.Pulse_Fil);		// Filter encoder position and pulse len
+	ENC_Norm(enc.IIF_Fil, enc.Pulse_Fil, &foc.theta, &foc.dtheta);			// Normalise to theta and dtheta
 
 	/* FOC maths */
 

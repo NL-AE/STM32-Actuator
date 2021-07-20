@@ -79,9 +79,8 @@ void  ADC_Norm_Misc  (int16_t PVDD_Fil, int16_t Temp_Fil, float*PVDD, float*Temp
 // Encoder
 int   Read_Encoder_SPI_Ang(float*Angle);				// ask for encoder angle over SPI
 void  IF_B_Int(void);									// Phase B interrupt for encoder
-void  ENC_Get_Raw(int16_t*IIF_out, int16_t*dIIF_out);										// Get raw values
-void  ENC_Filter (int16_t IIF_Raw, int16_t dIIF_Raw, int16_t*IIF_Fil, int16_t*dIIF_Fil);	// Filter
-void  ENC_Norm   (int16_t IIF_Fil, int16_t dIIF_Fil, float*theta, float*dtheta);			// Normalise encoder values
+void  ENC_Filter (int16_t IIF_Raw, uint32_t dIIF_Raw, int16_t*IIF_Fil, uint32_t*dIIF_Fil);	// Filter
+void  ENC_Norm   (int16_t IIF_Fil, uint32_t dIIF_Fil, float*theta, float*dtheta);			// Normalise encoder values
 // FOC stuff
 void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3);		// set pwm values for channels A,B,C
 float _SIN(float theta);											// sin(theta)
