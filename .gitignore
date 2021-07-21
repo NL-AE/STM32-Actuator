@@ -50,3 +50,7 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+Core/Src/stm32f4xx_hal_msp.c
+Debug/STM32F4-Actuator.bin
+Debug/STM32F4-Actuator.list
+STM32F4-Actuator Debug.launch
