@@ -87,6 +87,10 @@ float _sin(float theta);											// sin(theta)
 float _cos(float theta);											// cos(theta)
 // Interrupts
 void  FOC_Interrupt(void);		// FOC interrupt
+void  CAN_Interrupt(void);		// CAN RX interrupt
+
+// Misc
+void LED_Blink(int, uint32_t, GPIO_TypeDef*, uint16_t);
 
 /* USER CODE END EFP */
 

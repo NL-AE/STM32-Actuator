@@ -26,11 +26,11 @@
 #include <stdint.h>
 #include <math.h>
 #include "sin_lookup.h"
+#include "stm32f4xx_it.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -41,11 +41,19 @@
 #define Phase_B_Ch TIM_CHANNEL_1
 #define Phase_C_Ch TIM_CHANNEL_2
 
+// Enable DRV chip?
+#define DRV_EN 0
+
+// CAN ID (actuator) (0 to 7)
+#define CAN_ID 0
+
+// CAN ID (master)
+#define CAN_MASTER 99
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -60,7 +68,6 @@ SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 
 TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
 
@@ -72,13 +79,7 @@ typedef struct
 	int16_t  IIF_Counter;		// The counter variable that is interrupt driven so dont use it in calculations
 	int64_t  IIF_Revolutions;	// Number of full revolutions taken
 	uint16_t IIF_Raw;			// Current angle 0-4095
-
-//	uint32_t TimerVal1, TimerVal2;	// Timer values one for first rising edge and another for second rising edge
-//	uint32_t Pulse_Raw,Pulse_Fil;	// Length of phase B pulse
-//	uint8_t  Pulse_Measured;		// var to tell if to measure the pulse length
-
 } ENC_Struct;
-
 // ADC
 typedef struct
 {
@@ -94,7 +95,6 @@ typedef struct
 	int SO_Gain;						// Gain of sense amp
 	int16_t SO_A_Offset, SO_B_Offset;	// Raw offset of sense amp
 } ADC_Struct;
-
 // FOC
 typedef struct
 {
@@ -124,7 +124,6 @@ typedef struct
 	uint16_t PWM_Reg_Max;		// PWM register max
 	float PWM_A, PWM_C, PWM_B;	// Duty cycle
 } FOC_Struct;
-
 // Filter
 typedef struct
 {
@@ -135,18 +134,30 @@ typedef struct
 	// Filters i_a, i_b, PVDD, Temp, IIF count, IIF vel
 
 	float i_k[2];		// Filter coefficients for current filters
-	float IIF_k[2];		// Filter coefficients for IIF filters
 	float Misc_k[2];	// Filter coefficients for misc filter
 
 	int16_t i_a_Pre, i_a_Pre_Fil, i_b_Pre, i_b_Pre_Fil;			// Previous values for current
 	int16_t PVDD_Pre, PVDD_Pre_Fil, Temp_Pre, Temp_Pre_Fil;		// Previous values for PVDD and temp
-	int16_t IIF_Pre, IIf_Pre_Fil, dIIF_Pre, dIIF_Pre_Fil;		// Previous values for IIF and dIIF
 } FIL_Struct;
+// CAN
+typedef struct
+{
+	uint32_t timeout;		// timeout/ms
+
+	CAN_RxHeaderTypeDef rx_header;
+	uint8_t rx_data[8];
+
+	CAN_TxHeaderTypeDef tx_header;
+	uint8_t tx_data[6];
+
+	CAN_FilterTypeDef filter;
+} CAN_Struct;
 
 ENC_Struct enc;
 ADC_Struct adc;
 FOC_Struct foc;
 FIL_Struct fil;
+CAN_Struct can;
 
 /* USER CODE END PV */
 
@@ -161,9 +172,7 @@ static void MX_ADC2_Init(void);
 static void MX_ADC3_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
-static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
-
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -173,7 +182,7 @@ static void MX_TIM2_Init(void);
 int _write(int file, char *ptr, int len)
 {
 	int i=0;
-	for(i=0; i<len;i++)
+	for(i=0; i<len; i++)
 		ITM_SendChar((*ptr++));
 	return len;
 }
@@ -187,7 +196,6 @@ int _write(int file, char *ptr, int len)
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -196,14 +204,12 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
   /* USER CODE END Init */
 
   /* Configure the system clock */
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -216,9 +222,7 @@ int main(void)
   MX_ADC3_Init();
   MX_SPI1_Init();
   MX_SPI2_Init();
-  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-
   HAL_Delay(10);
   printf("Actuator Firmware Version: 1.0\n");	HAL_Delay(10);
 
@@ -233,7 +237,6 @@ int main(void)
   /* Startup Timers */
   printf("Start Timers... ");
   HAL_TIM_Base_Start_IT(&htim1);
-  HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_PWM_Start(&htim1, Phase_A_Ch);
   HAL_TIM_PWM_Start(&htim1, Phase_B_Ch);
   HAL_TIM_PWM_Start(&htim1, Phase_C_Ch);
@@ -242,29 +245,52 @@ int main(void)
   HAL_Delay(10);
 
   /* Startup DRV chip */
-  printf("Start DRV... ");
-  int DRV_Err = DRV_Start();		// startup and write SPI registers
-  if(DRV_Err){							// if errors occurs,
-	  printf("Error: %i\n",DRV_Err);
-	  while(1);
+  if(DRV_EN){
+	  printf("Start DRV... ");
+	  int DRV_Err = DRV_Start();			// startup and write SPI registers
+	  if(DRV_Err){							// if errors occurs,
+	   printf("DRV Error: %i\n",DRV_Err);
+	   Error_Handler();							// enter hardfault handler
+	  }
+	  DRV_Zero_SO();						// Zero sense amps
+	  printf("Good\n");
+	  HAL_Delay(10);
+  }else{
+	  HAL_GPIO_WritePin(DRV_EN_GPIO_Port, DRV_EN_Pin, 0);	// Set enable of DRV chip low
   }
-  DRV_Zero_SO();						// Zero sense amps
-  printf("Good\n");
-  HAL_Delay(10);
 
   /* Check Encoder talks */
   printf("Start ENC... ");
   int Enc_Err = Read_Encoder_SPI_Ang(&enc.SPI_theta);	// read one value from encoders
-  if(Enc_Err){							// if errors occurs,
-	  printf("Error: %i\n",Enc_Err);
-	  while(1);
+  if(Enc_Err){								// if errors occurs,
+	  printf("ENC Error: %i\n",Enc_Err);
+	  Error_Handler();							// enter hardfault handler
   }
   enc.IIF_Counter = (int)(enc.SPI_theta /360.0f * 4095.0f);	// Zero encoder
   printf("Good\n");
   HAL_Delay(10);
 
+  /* CAN setup */
+  can.filter.FilterFIFOAssignment 	= CAN_FILTER_FIFO0;		// set fifo assignment
+  can.filter.FilterIdHigh			= CAN_ID<<5; 			// set CAN ID
+  can.filter.FilterIdLow			= 0x0;
+  can.filter.FilterMaskIdHigh		= 0xFFF;
+  can.filter.FilterMaskIdLow		= 0;
+  can.filter.FilterMode 			= CAN_FILTERMODE_IDMASK;
+  can.filter.FilterScale			= CAN_FILTERSCALE_32BIT;
+  can.filter.FilterActivation		= ENABLE;
+  HAL_CAN_ConfigFilter(&hcan1, &can.filter);
+
+  can.tx_header.DLC 	= 6; 			// N bytes in tx message
+  can.tx_header.IDE 	= CAN_ID_STD; 	// set identifier to standard
+  can.tx_header.RTR 	= CAN_RTR_DATA; // set data type to remote transmission request?
+  can.tx_header.StdId 	= CAN_MASTER; 	// recipient CAN ID
+
+  HAL_CAN_Start(&hcan1); 									//start CAN
+  __HAL_CAN_ENABLE_IT(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING); // Start can interrupt
+
   /* Setup ADC structure */
-  adc.VDDA = 3.25f;				// Actually 3.25V not 3.3V
+  adc.VDDA = 3.30f;
   adc.V_bat_R_Top = 75.0f;
   adc.V_bat_R_Bot = 5.1f;
   adc.Temp_V_Offset = 0.424f;
@@ -279,7 +305,6 @@ int main(void)
 
   /* Setup Filter structure */
   fil.i_k[0]    = 0.421f;	fil.i_k[1]    = 0.158f;
-  fil.IIF_k[0]  = 0.421f;	fil.IIF_k[1]  = 0.158f;
   fil.Misc_k[0] = 0.421f;	fil.Misc_k[1] = 0.158f;
 
   printf("FOC Start\n");
@@ -292,19 +317,23 @@ int main(void)
   while (1)
   {
 	  /* Heartbeat */
-//	  HAL_GPIO_WritePin(G_LED_GPIO_Port, G_LED_Pin, 1);
-	  HAL_GPIO_TogglePin(G_LED_GPIO_Port, G_LED_Pin);
+	  HAL_GPIO_WritePin(G_LED_GPIO_Port, G_LED_Pin, 1);
 
 	  // Read if there is an error
-	  if(HAL_GPIO_ReadPin(DRV_FAULT_GPIO_Port, DRV_FAULT_Pin)==0)
-		  DRV_Error();
+	  if(DRV_EN)
+		  if(HAL_GPIO_ReadPin(DRV_FAULT_GPIO_Port, DRV_FAULT_Pin)==0)
+			  DRV_Error();
 
 	  ADC_Filter_Misc(adc.PVDD_Raw,adc.Temp_Raw,&adc.PVDD_Fil,&adc.Temp_Fil);	// Filter raw ADC PVDD and temp
 	  ADC_Norm_Misc(adc.PVDD_Fil,adc.Temp_Fil,&adc.PVDD,&adc.Temp);				// Normalise PVDD and temp
 
-//	  HAL_GPIO_WritePin(G_LED_GPIO_Port, G_LED_Pin, 0);
+	  printf("ENC IIF: %i\n",enc.IIF_Raw);
 
-	  HAL_Delay(100);
+	  HAL_Delay(50);
+
+	  HAL_GPIO_WritePin(G_LED_GPIO_Port, G_LED_Pin, 0);
+
+	  HAL_Delay(50);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -715,51 +744,6 @@ static void MX_TIM1_Init(void)
 }
 
 /**
-  * @brief TIM2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM2_Init(void)
-{
-
-  /* USER CODE BEGIN TIM2_Init 0 */
-
-  /* USER CODE END TIM2_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM2_Init 1 */
-
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4294967295;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
-
-  /* USER CODE END TIM2_Init 2 */
-
-}
-
-/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -935,6 +919,7 @@ void  DRV_Zero_SO(void)
 	Array_Sort(temp_A,outp_A,5);
 	Array_Sort(temp_B,outp_B,5);
 
+	// Take average of three readings in the middle
 	adc.SO_A_Offset = (outp_A[1]+outp_A[2]+outp_A[3]) / 3;
 	adc.SO_B_Offset = (outp_B[1]+outp_B[2]+outp_B[3]) / 3;
 
@@ -1016,9 +1001,6 @@ int   Read_Encoder_SPI_Ang(float*Angle)
 	const uint8_t ENC_ASK_POS [2] = {0b10000000,0b00100000};	// Command for asking position
 	uint8_t ENC_SPI_Buffer[4];
 
-	//HAL_SPI_Transmit(&hspi1, (uint8_t*)&ENC_ASK_POS,   2, 1);
-	//HAL_SPI_Receive (&hspi1, (uint8_t*)ENC_SPI_Buffer, 3, 1);
-
 	if(HAL_SPI_Transmit(&hspi1, (uint8_t*)&ENC_ASK_POS,   2, 1)) return 1;	// Ask for data
 	if(HAL_SPI_Receive (&hspi1, (uint8_t*)ENC_SPI_Buffer, 3, 1)) return 2;	// Recieve 2 bytes of data
 
@@ -1031,14 +1013,6 @@ int   Read_Encoder_SPI_Ang(float*Angle)
 }
 void  IF_B_Int(void)
 {
-//	if(enc.Pulse_Measured==0){
-//		enc.TimerVal1 = __HAL_TIM_GET_COUNTER(&htim2);	// Store in value 1
-//		enc.Pulse_Measured = 1;
-//	}else{
-//		enc.TimerVal2 = __HAL_TIM_GET_COUNTER(&htim2);	// Store in value 2
-//		enc.Pulse_Measured = 0;
-//	}
-
 	if(HAL_GPIO_ReadPin(IF_A_GPIO_Port, IF_A_Pin))
 		enc.IIF_Counter++;		// If high, increment
 	else
@@ -1056,27 +1030,6 @@ void  IF_B_Int(void)
 		enc.IIF_Revolutions--;		// Decrement revolutions counter
 	}
 }
-/*
-void  ENC_Filter (int16_t IIF_Raw, uint32_t dIIF_Raw, int16_t*IIF_Fil, uint32_t*dIIF_Fil)
-{
-	// Filter
-	*IIF_Fil  = fil.IIF_k[0]* IIF_Raw + fil.IIF_k[0]*fil.IIF_Pre  + fil.IIF_k[1]*fil.IIf_Pre_Fil ;
-	*dIIF_Fil = fil.IIF_k[0]*dIIF_Raw + fil.IIF_k[0]*fil.dIIF_Pre + fil.IIF_k[1]*fil.dIIF_Pre_Fil;
-
-	// Now store current values as previous values
-	fil.IIF_Pre  = IIF_Raw;
-	fil.dIIF_Pre = dIIF_Raw;
-
-	fil.IIf_Pre_Fil  = *IIF_Fil;
-	fil.dIIF_Pre_Fil = *dIIF_Fil;
-}*/
-/*
-void  ENC_Norm   (int16_t IIF_Fil, uint32_t Pulse_Fil, float*theta, float*dtheta)
-{
-	*theta = (float)IIF_Fil/4095.0f*360.0f;
-	*dtheta = 84000000.0f * 360.0f / 4096.0f / (float)Pulse_Fil;
-}
-*/
 // FOC stuff
 void  Set_PWM3(uint16_t ARR_1, uint16_t ARR_2, uint16_t ARR_3)
 {
@@ -1109,29 +1062,23 @@ void  FOC_Interrupt(void)
 
 	/* FOC maths */
 	// Get electrical angles correct
-//	foc.e_theta = fmodf(foc.m_theta*foc.Pole_Pairs,360.0f);	// get electrical angle and constrain in 360 deg
+	foc.e_theta = fmodf(foc.m_theta*foc.Pole_Pairs,360.0f);	// get electrical angle and constrain in 360 deg
 
-	foc.e_theta += 0.005;
+	// Clarke -> alpha/beta
+	foc.i_alph = foc.i_a;
+	foc.i_beta = SQRT1_3 * (2.0f*foc.i_b - foc.i_a);
 
-	foc.e_theta = fmodf(foc.e_theta,360.0f);	// constrain in 0-360deg
-
-//	// Clarke -> alpha/beta
-//	foc.i_alph = foc.i_a;
-//	foc.i_beta = SQRT1_3 * (2*foc.i_b - foc.i_a);
-//
-//	// Park -> direct/quadrature
-//	float sin_Ang = _sin(foc.e_theta);
-//	float cos_Ang = _cos(foc.e_theta);
-//	foc.i_d = cos_Ang*foc.i_alph + sin_Ang*foc.i_beta;
-//	foc.i_q = cos_Ang*foc.i_beta - sin_Ang*foc.i_alph;
+	// Park -> direct/quadrature
+	float sin_Ang = _sin(foc.e_theta);
+	float cos_Ang = _cos(foc.e_theta);
+	foc.i_d = cos_Ang*foc.i_alph + sin_Ang*foc.i_beta;
+	foc.i_q = cos_Ang*foc.i_beta - sin_Ang*foc.i_alph;
 
 	/* Regulate currents */
-	foc.DC_I = 0.1;				// Current duty cycle
+	foc.DC_I = 0.1f;				// Current duty cycle
 
 	/* Set PWM Compare values */
-	foc.alpha = foc.e_theta;
-	while(foc.alpha>=60.0f)
-		foc.alpha -= 60.0f;	// calculate alpha
+	foc.alpha = fmodf(foc.e_theta,60.0f);	// calculate alpha
 
 	foc.DC_1 = foc.DC_I*_sin(60.0f - foc.alpha);
 	foc.DC_2 = foc.DC_I*_sin(foc.alpha);
@@ -1139,7 +1086,8 @@ void  FOC_Interrupt(void)
 
 	foc.sector = (int)floor(foc.e_theta/60.0f);
 
-	switch (foc.sector) {
+	switch (foc.sector)
+	{
 		case 0:
 			foc.PWM_A = 0.5*foc.DC_0;
 			foc.PWM_B = 0.5*foc.DC_0 + foc.DC_1;
@@ -1177,6 +1125,53 @@ void  FOC_Interrupt(void)
 	/* LED off */
 	HAL_GPIO_WritePin(Y_LED_GPIO_Port, Y_LED_Pin, 0);
 }
+void  CAN_Interrupt(void)
+{
+	// Get CAN message
+	HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &can.rx_header, can.rx_data);
+
+	// Create CAN response message
+	uint32_t TxMailbox;
+	can.tx_data[0] = can.id;
+	can.tx_data[1] = can.id;
+	can.tx_data[2] = can.id;
+	can.tx_data[3] = can.id;
+	can.tx_data[4] = can.id;
+	can.tx_data[5] = can.id;
+
+	// Send CAN message
+	HAL_CAN_AddTxMessage(&hcan1, &can.tx_header, can.tx_data, &TxMailbox);
+
+	// if special commands, do function else unpack rx message
+	if((can.rx_data[0]==0xFF) & (can.rx_data[1]==0xFF) & (can.rx_data[2]==0xFF) & (can.rx_data[3]==0xFF) & (can.rx_data[4]==0xFF))
+	{
+		switch (can.rx_data[5])
+		{
+		case 0:
+			break;
+		case 1:
+			break;
+		}
+	}
+	else
+	{
+		// unpack and update target values
+	}
+
+	can.timeout = 0;	// reset timeout timer
+}
+
+// Misc
+void LED_Blink(int N, uint32_t delay, GPIO_TypeDef* GPIOx, uint16_t GPIO_PIN)
+{
+	for (int i = 0; i < N; ++i)
+	{
+		HAL_GPIO_WritePin(GPIOx,GPIO_PIN,1);
+		HAL_Delay(delay);
+		HAL_GPIO_WritePin(GPIOx,GPIO_PIN,0);
+		HAL_Delay(delay);
+	}
+}
 
 /* USER CODE END 4 */
 
@@ -1187,10 +1182,16 @@ void  FOC_Interrupt(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
+
+  Set_PWM3(0, 0, 0);	// turn off PWM
+
   __disable_irq();
+
   while (1)
   {
+	  LED_Blink(3,200,Y_LED_GPIO_Port,Y_LED_Pin);	HAL_Delay(200);	// S
+	  LED_Blink(3,400,Y_LED_GPIO_Port,Y_LED_Pin);					// O
+	  LED_Blink(3,200,Y_LED_GPIO_Port,Y_LED_Pin);	HAL_Delay(800);	// S
   }
   /* USER CODE END Error_Handler_Debug */
 }
