@@ -1132,12 +1132,12 @@ void  CAN_Interrupt(void)
 
 	// Create CAN response message
 	uint32_t TxMailbox;
-	can.tx_data[0] = can.id;
-	can.tx_data[1] = can.id;
-	can.tx_data[2] = can.id;
-	can.tx_data[3] = can.id;
-	can.tx_data[4] = can.id;
-	can.tx_data[5] = can.id;
+	can.tx_data[0] = CAN_ID;
+	can.tx_data[1] = CAN_ID;
+	can.tx_data[2] = CAN_ID;
+	can.tx_data[3] = CAN_ID;
+	can.tx_data[4] = CAN_ID;
+	can.tx_data[5] = CAN_ID;
 
 	// Send CAN message
 	HAL_CAN_AddTxMessage(&hcan1, &can.tx_header, can.tx_data, &TxMailbox);
