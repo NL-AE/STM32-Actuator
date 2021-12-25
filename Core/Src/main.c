@@ -36,6 +36,8 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+#define REV 1	// code revision
+
 // Phase Mappings
 #define Phase_A_Ch TIM_CHANNEL_3
 #define Phase_B_Ch TIM_CHANNEL_1
@@ -44,11 +46,10 @@
 // Enable DRV chip?
 #define DRV_EN 0
 
-// CAN ID (actuator) (0 to 7)
-#define CAN_ID 0
+// CAN ID (actuator)
+#define CAN_TX_ID 1		// Transmits as this ID
+#define CAN_RX_ID 1		// Recieves messages from this ID
 
-// CAN ID (master)
-#define CAN_MASTER 99
 
 /* USER CODE END PD */
 
@@ -145,19 +146,28 @@ typedef struct
 	uint32_t timeout;		// timeout/ms
 
 	CAN_RxHeaderTypeDef rx_header;
-	uint8_t rx_data[8];
+	uint8_t rx_data[6];
 
 	CAN_TxHeaderTypeDef tx_header;
 	uint8_t tx_data[6];
 
 	CAN_FilterTypeDef filter;
 } CAN_Struct;
+// Controller
+typedef struct
+{
+	float Torque;
+	float Velocity;
+
+
+} CON_Struct;
 
 ENC_Struct enc;
 ADC_Struct adc;
 FOC_Struct foc;
 FIL_Struct fil;
 CAN_Struct can;
+CON_Struct con;
 
 /* USER CODE END PV */
 
@@ -224,7 +234,8 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
   HAL_Delay(10);
-  printf("Actuator Firmware Version: 1.0\n");	HAL_Delay(10);
+  printf("Actuator Firmware Version: %i\n",REV);
+  HAL_Delay(10);
 
   /* Start ADCs */
   printf("Start ADC... ");
@@ -271,23 +282,33 @@ int main(void)
   HAL_Delay(10);
 
   /* CAN setup */
-  can.filter.FilterFIFOAssignment 	= CAN_FILTER_FIFO0;		// set fifo assignment
-  can.filter.FilterIdHigh			= CAN_ID<<5; 			// set CAN ID
-  can.filter.FilterIdLow			= 0x0;
-  can.filter.FilterMaskIdHigh		= 0xFFF;
-  can.filter.FilterMaskIdLow		= 0;
-  can.filter.FilterMode 			= CAN_FILTERMODE_IDMASK;
+  printf("Start CAN... ");
+  // Config RX Filter
+  can.filter.FilterActivation		= ENABLE;					// use filter or not
+  can.filter.FilterBank				= 0;						// specifies which filter to be initialised
+  can.filter.FilterFIFOAssignment	= CAN_RX_FIFO0;				// specifies which FIFO this is for
+  can.filter.FilterIdHigh			= CAN_RX_ID<<5;				// MSB for 32 bit / first  16 bit
+  can.filter.FilterIdLow			= 0x0000;					// LSB for 32 bit / second 16 bit
+  can.filter.FilterMaskIdHigh		= CAN_RX_ID<<5;				// MSB for 32 bit / first  16 bit
+  can.filter.FilterMaskIdLow		= 0x0000;					// LSB for 32 bit / second 16 bit
+  can.filter.FilterMode				= CAN_FILTERMODE_IDMASK;
   can.filter.FilterScale			= CAN_FILTERSCALE_32BIT;
-  can.filter.FilterActivation		= ENABLE;
+  can.filter.SlaveStartFilterBank	= 14;						// select filter for slave CAN to use
+
   HAL_CAN_ConfigFilter(&hcan1, &can.filter);
+  HAL_CAN_Start(&hcan1);
 
-  can.tx_header.DLC 	= 6; 			// N bytes in tx message
-  can.tx_header.IDE 	= CAN_ID_STD; 	// set identifier to standard
-  can.tx_header.RTR 	= CAN_RTR_DATA; // set data type to remote transmission request?
-  can.tx_header.StdId 	= CAN_MASTER; 	// recipient CAN ID
+  // Config TX
+  can.tx_header.DLC 				= 6;			// Data length/bytes
+  can.tx_header.IDE					= CAN_ID_STD;	// standard ID
+  can.tx_header.RTR					= CAN_RTR_DATA;	// set data type to transmission
+  can.tx_header.StdId				= CAN_TX_ID;	// recipient CAN ID
+  can.tx_header.ExtId				= CAN_TX_ID;   	// recipient extended CAN ID
+  can.tx_header.TransmitGlobalTime	= DISABLE;
 
-  HAL_CAN_Start(&hcan1); 									//start CAN
   __HAL_CAN_ENABLE_IT(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING); // Start can interrupt
+  printf("Good\n");
+  HAL_Delay(10);
 
   /* Setup ADC structure */
   adc.VDDA = 3.30f;
@@ -308,7 +329,7 @@ int main(void)
   fil.Misc_k[0] = 0.421f;	fil.Misc_k[1] = 0.158f;
 
   printf("FOC Start\n");
-  HAL_Delay(500);
+  HAL_Delay(10);
 
   /* USER CODE END 2 */
 
@@ -563,11 +584,11 @@ static void MX_CAN1_Init(void)
 
   /* USER CODE END CAN1_Init 1 */
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 14;
-  hcan1.Init.Mode = CAN_MODE_NORMAL;
+  hcan1.Init.Prescaler = 7;
+  hcan1.Init.Mode = CAN_MODE_LOOPBACK;
   hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan1.Init.TimeSeg1 = CAN_BS1_1TQ;
-  hcan1.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_3TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_2TQ;
   hcan1.Init.TimeTriggeredMode = DISABLE;
   hcan1.Init.AutoBusOff = DISABLE;
   hcan1.Init.AutoWakeUp = DISABLE;
@@ -1128,16 +1149,27 @@ void  FOC_Interrupt(void)
 void  CAN_Interrupt(void)
 {
 	// Get CAN message
+		// 4b  Unused
+		// 12b Position
+		// 16b Velocity
+		// 16b Torque
 	HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &can.rx_header, can.rx_data);
 
 	// Create CAN response message
+		// 8b  temp
+		// 12b position
+		// 14b velocity
+		// 14b torque
 	uint32_t TxMailbox;
-	can.tx_data[0] = CAN_ID;
-	can.tx_data[1] = CAN_ID;
-	can.tx_data[2] = CAN_ID;
-	can.tx_data[3] = CAN_ID;
-	can.tx_data[4] = CAN_ID;
-	can.tx_data[5] = CAN_ID;
+	uint16_t temp_vel = 0b0011111111111111;
+	uint16_t temp_tor = 0b0011111111111111;
+
+	can.tx_data[0] = (uint8_t) (((float)adc.Temp_Fil*adc.VDDA/4095.0f)-adc.Temp_V_Offset)/adc.Temp_Slope;
+	can.tx_data[1] = (uint8_t) (enc.IIF_Raw>>4);
+	can.tx_data[2] = (uint8_t) ((enc.IIF_Raw<<4) | ((temp_vel>>10) & 0b00001111));
+	can.tx_data[3] = (uint8_t) (temp_vel>>2);
+	can.tx_data[4] = (uint8_t) ((temp_vel<<6) | ((temp_tor>>8) & 0b00001111));
+	can.tx_data[5] = (uint8_t) (temp_tor);
 
 	// Send CAN message
 	HAL_CAN_AddTxMessage(&hcan1, &can.tx_header, can.tx_data, &TxMailbox);
