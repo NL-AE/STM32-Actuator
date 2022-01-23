@@ -57,3 +57,12 @@ STM32F4-Actuator Debug.launch
 Debug/STM32F4-Actuator.bin
 Debug/STM32F4-Actuator.list
 Debug/STM32F4-Actuator.bin
+.settings/language.settings.xml
+.settings/stm32cubeide.project.prefs
+.settings/stm32cubeide.project.prefs
+.settings/language.settings.xml
+.settings/language.settings.xml
+.settings/stm32cubeide.project.prefs
+Debug/Core/Src/subdir.mk
+Debug/Drivers/STM32F4xx_HAL_Driver/Src/subdir.mk
+*.list
