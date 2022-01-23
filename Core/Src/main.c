@@ -47,7 +47,7 @@
 #define DRV_EN 0
 
 // CAN ID (actuator)
-#define CAN_TX_ID 1		// Transmits as this ID
+#define CAN_TX_ID 2		// Transmits as this ID
 #define CAN_RX_ID 1		// Recieves messages from this ID
 
 
